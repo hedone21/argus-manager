@@ -1,0 +1,24 @@
+---
+source: manager/tests/sim/test_scenarios.rs
+expression: summary
+---
+duration_s: 30
+heartbeat_count: 30
+signal_count_by_kind:
+  compute_guidance: 120
+  energy_constraint: 15
+  memory_pressure: 60
+  thermal_alert: 30
+directive_count: 1
+directive_kinds:
+  SetPartitionRatio: 1
+first_directive_at_s: 6.5
+state_final:
+  kv_cache_bytes_mib: 44.98
+  device_memory_used_mb: 3500
+  engine_cpu_pct: 40
+  engine_gpu_pct: 70
+  cpu_freq_ratio: 1
+  gpu_freq_ratio: 1
+  thermal_c: 42
+  throughput_tps: 11.1

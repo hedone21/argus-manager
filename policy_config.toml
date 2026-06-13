@@ -1,0 +1,36 @@
+[policy.exclusion_groups]
+kv_quality = ["kv.evict_sliding", "kv.evict_h2o", "kv.merge_d2o", "kv.quant_dynamic"]
+
+[compute]
+# gpu_sysfs_path = "/sys/kernel/gpu/gpu_busy_percentage"  # Adreno 기본값. 없으면 자동 탐색.
+
+[adaptation]
+qcf_penalty_weight = 0.5   # QCF quality penalty weight (V_Q in DPP)
+qcf_stale_secs = 5.0       # QCF cache TTL seconds
+ewma_alpha = 0.875
+relief_table_path = ""
+temp_safe_c = 35.0
+temp_critical_c = 50.0
+dedup_cooldown_secs = 60.0
+persist_interval_secs = 300.0
+linucb_alpha = 0.5
+
+[adaptation.trigger]
+tbt_enter = 0.30
+tbt_exit = 0.10
+tbt_warmup_tokens = 20
+mem_enter = 0.80
+mem_exit = 0.60
+temp_enter = 0.70
+temp_exit = 0.50
+
+[adaptation.default_relief]
+switch_hw = [0.5, -0.3, 0.0, 0.3, -0.1, 0.0]
+"kv.evict_h2o" = [0.1, 0.0, 0.4, 0.1, 0.0, 0.0]
+"kv.evict_sliding" = [0.1, 0.0, 0.3, 0.1, 0.0, 0.0]
+throttle = [0.0, 0.3, 0.0, 0.2, -0.2, 0.0]
+set_target_tbt = [0.0, 0.2, 0.0, 0.1, -0.1, 0.0]
+"weight.skip" = [0.2, 0.1, 0.0, 0.1, -0.1, 0.0]
+"kv.quant_dynamic" = [0.0, 0.0, 0.5, 0.0, 0.0, 0.0]
+"kv.merge_d2o" = [0.1, 0.0, 0.3, 0.1, 0.0, 0.0]
+set_partition_ratio = [0.3, -0.2, 0.0, 0.1, 0.0, 0.0]

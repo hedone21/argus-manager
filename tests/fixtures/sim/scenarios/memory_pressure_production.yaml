@@ -1,0 +1,32 @@
+# memory_pressure_production.yaml
+#
+# 시나리오: production 정책(policy_example.lua) 검증용 지속 메모리 압박
+# 목적: policy_config.toml의 default_relief로 실제 정책 동작 확인
+#
+# 예상 동작 (120s / dedup=60s):
+#   t=0.5~8s  : memory 6500 → 7800 MB 상승 (tau=8s)
+#   t≈8~10s   : LevelTransition Normal→Warning (avail≈14.5%)
+#   t≈10s     : LevelTransition Warning→Critical (avail≈8.5%)
+#   t≈13s     : 첫 번째 directive (kv_evict_sliding, mem_relief=0.3 최고)
+#   t≈73s     : dedup cooldown 만료 (60s 경과)
+#   t≈75s     : 두 번째 directive (압박 지속 시)
+#
+# 주입: 100s 지속 → 60s dedup 이후에도 압박 유지
+
+extends: ../baseline.yaml
+
+rng_seed: 44
+
+initial_state:
+  phase: "decode"
+  device_memory_used_mb: 6500
+  kv_cache_bytes: 536870912   # 512 MiB
+  kv_cache_tokens: 512
+
+external_injections:
+  - t_start: 0.5
+    duration: 100.0
+    var: device_memory_used_mb
+    op: set
+    delta: 7800.0
+    tau_s: 8.0

@@ -1,0 +1,35 @@
+# memory_pressure_steady.yaml
+#
+# 시나리오: decode 중 메모리 사용량 선형 상승 (6500 → 7800 MB / 10초)
+# 목적: Warning/Critical 진입 타이밍과 Evict directive 발동 검증.
+#
+# 예상 동작:
+#   t=0~4s  : used=6500 → Normal (available≈20%)
+#   t~5s    : used≈7000 → Warning (available≈14.5%)
+#   t~8s    : used≈7500 → Critical (available≈8.5%)
+#   policy  : memory_evict_graduated.lua가 Warning→evict0.8, Critical→evict0.5 반환
+#
+# rng_seed=42 → 완전 결정론
+#
+# 주의: op:set 방식으로 time-weighted target 설정.
+#   - t_start=0.5, duration=10s 동안 device_memory_used_mb를 7800으로 set (tau_s=8.0으로 선형 접근)
+
+extends: ../baseline.yaml
+
+rng_seed: 42
+
+initial_state:
+  # decode 모드로 시작 (KV 캐시 성장 포함)
+  phase: "decode"
+  device_memory_used_mb: 6500
+  kv_cache_bytes: 536870912   # 512 MiB — 초기 KV 점유
+  kv_cache_tokens: 512
+
+# 메모리 사용량: 1차 지연으로 7800 MB 목표치로 점진 상승 (tau=8s, ~10초 후 도달)
+external_injections:
+  - t_start: 0.5
+    duration: 30.0
+    var: device_memory_used_mb
+    op: set
+    delta: 7800.0
+    tau_s: 8.0

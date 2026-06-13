@@ -1,0 +1,37 @@
+# s25_memory_pressure_steady.yaml
+#
+# 시나리오: Galaxy S25 기준 decode 중 메모리 사용량 선형 상승
+#          (8192 → 11500 MB / ~30초). Warning/Critical 임계 둘 다 통과.
+# 목적: production 범용 Lua 정책(`manager/scripts/policy_example.lua`)이
+#       S25 환경에서 memory pressure에 반응해 Evict directive를 방출하는지 검증.
+#
+# 임계 추정 (총 12288 MB):
+#   Warning  ≈ 15% available  → used ≈ 10444 MB
+#   Critical ≈ 10% available  → used ≈ 11059 MB
+#
+# 예상 동작:
+#   t=0~8s   : used=8192 → Normal
+#   t~14s    : used≈10500 → Warning 진입
+#   t~22s    : used≈11100 → Critical 진입
+#   policy   : pressure.memory가 가장 높은 도메인 → relief 학습 후 evict 선택
+#
+# rng_seed=42 → 완전 결정론
+
+extends: ../s25_galaxy.yaml
+
+rng_seed: 42
+
+initial_state:
+  phase: "decode"
+  device_memory_used_mb: 8192
+  kv_cache_bytes: 805306368   # 768 MiB — 초기 KV 점유
+  kv_cache_tokens: 768
+
+# 메모리 사용량 1차 지연 램프: 11500 MB 목표, tau=10s
+external_injections:
+  - t_start: 0.5
+    duration: 30.0
+    var: device_memory_used_mb
+    op: set
+    delta: 11500.0
+    tau_s: 10.0

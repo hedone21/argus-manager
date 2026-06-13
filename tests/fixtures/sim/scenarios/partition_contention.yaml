@@ -1,0 +1,39 @@
+# partition_contention.yaml
+#
+# 시나리오: partition_ratio=0.5 decode → memory bandwidth 경합 → throughput 저하
+# 목적: latency pressure 상승 시 정책(partition_adaptive.lua)이 반응하는지 검증.
+#
+# 물리 모델 근거:
+#   memory_bw_utilization_pct에 parabola 항 (0.6 * ratio*(1-ratio)*4)이 있어
+#   ratio=0.5에서 최대 경합 → throughput contention penalty 최대.
+#   tbt_ms = 1000 / throughput_tps 상승 → latency_degradation 양수 → 정책 반응 필요.
+#
+# 예상 동작:
+#   t=0s   : partition_ratio=0.5, decode 시작
+#   t~2s   : bw_util 증가 → throughput < base_tps_decode_partition
+#   t~5s   : bw_util 추가 상승(external injection) → ComputeGuidance Warning 발생
+#   정책  : partition_adaptive.lua가 SetPartitionRatio(0.25) 또는 (0.0) 반환
+#
+# rng_seed=42 → 결정론
+
+extends: ../baseline.yaml
+
+rng_seed: 42
+
+initial_state:
+  phase: "decode"
+  partition_ratio: 0.5
+  # tbt_target_ms 설정 → latency_degradation 계산에 사용
+  tbt_target_ms: 55.0        # base = 1000/18.5 ≈ 54ms, 경합 시 초과
+  active_device: "opencl"
+  engine_gpu_pct: 70.0
+  engine_cpu_pct: 40.0
+
+external_injections:
+  # t=3s부터 memory bandwidth 외부 부하 상승: 80% 목표 (tau=2s)
+  - t_start: 3.0
+    duration: 27.0
+    var: memory_bw_utilization_pct
+    op: set
+    delta: 80.0
+    tau_s: 2.0

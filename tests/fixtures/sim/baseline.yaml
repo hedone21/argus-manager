@@ -1,0 +1,254 @@
+# baseline.yaml — Llama 3.2 1B on Galaxy S25 (근사 추정치)
+#
+# TODO(K): Calibration 도구 완성 후 실측값으로 교체 필요.
+# 현재 값은 보수적 추정치 (manual estimate).
+#
+# extends는 없음 — baseline은 최상위 parent.
+
+initial_state:
+  # KV cache (F16, 1B 모델, 초기 0 tokens)
+  kv_cache_bytes: 0             # 현재 점유 바이트
+  kv_cache_capacity_bytes: 4294967296  # 4 GiB — 할당 가능 최대
+  kv_cache_tokens: 0
+  kv_cache_token_capacity: 2048
+  kv_dtype: "f16"
+
+  # Device memory (Galaxy S25 — 8 GB LPDDR5X, OS + 다른 앱 포함)
+  # TODO(K): 실측 필요.
+  device_memory_total_mb: 8192
+  device_memory_used_mb: 3500
+  memory_bw_utilization_pct: 20.0
+
+  # CPU (Galaxy S25 — Snapdragon 8 Elite, Big cluster max ~3.2 GHz)
+  engine_cpu_pct: 30.0
+  external_cpu_pct: 15.0
+  cpu_freq_mhz: 2400
+  cpu_max_freq_mhz: 3200
+  cpu_min_freq_mhz: 400
+
+  # GPU (Adreno 830, ~1.1 GHz max)
+  engine_gpu_pct: 65.0
+  external_gpu_pct: 5.0
+  gpu_freq_mhz: 810
+  gpu_max_freq_mhz: 1100
+  gpu_min_freq_mhz: 300
+
+  # Thermal
+  thermal_c: 42.0
+  cpu_cluster_thermal_c: 44.0
+  gpu_cluster_thermal_c: 48.0
+  throttle_threshold_c: 85.0
+
+  # Phase / throughput 추정치 (Llama 3.2 1B, Q4_0)
+  # TODO(K): llama.cpp baseline 결과와 비교하여 refit.
+  phase: "idle"
+  base_tps_decode_gpu: 18.5
+  base_tps_decode_cpu: 4.2
+  base_tps_decode_partition: 22.0
+  base_tps_prefill_gpu: 145.0
+
+  # Engine 상태 (초기 idle)
+  active_device: "opencl"
+  active_actions: []
+  partition_ratio: 0.0
+  throttle_delay_ms: 0.0
+  tbt_target_ms: 0.0
+
+actions:
+  Evict:
+    when: "target_ratio > 0 && target_ratio < 1"
+    kv_cache_bytes:
+      op: scale
+      factor: "target_ratio"
+      tau_s: 0.3
+    kv_cache_tokens:
+      op: scale
+      factor: "target_ratio"
+      tau_s: 0.3
+
+  Throttle:
+    engine_cpu_pct:
+      op: scale
+      factor: "max(0.3, 1.0 - delay_ms / 500.0)"
+      tau_s: 0.8
+
+  SwitchHw:
+    when: "device == \"cpu\""
+    active_device:
+      op: set
+      value: '"cpu"'
+      tau_s: 0.0
+    engine_gpu_pct:
+      op: set
+      value: 0.0
+      tau_s: 0.2
+    engine_cpu_pct:
+      op: set
+      value: 85.0
+      tau_s: 0.5
+
+  SetPartitionRatio:
+    partition_ratio:
+      op: set
+      value: "ratio"
+      tau_s: 0.1
+
+  KvQuantDynamic:
+    kv_dtype:
+      op: set
+      value: '"f16"'
+      tau_s: 0.0
+
+  LayerSkip:
+    skip_ratio:
+      op: set
+      value: "ratio"
+      tau_s: 0.0
+    base_tps_decode_gpu:
+      op: scale
+      factor: "1.0 + ratio * 0.8"
+      tau_s: 0.0
+    base_tps_decode_cpu:
+      op: scale
+      factor: "1.0 + ratio * 0.8"
+      tau_s: 0.0
+
+composition:
+  default: multiply
+  per_dimension:
+    throughput_tps: multiply
+    engine_cpu_pct: max
+    device_memory_used_mb: add
+    thermal_c: add_delta
+
+interactions:
+  - actions: [Throttle, SetPartitionRatio]
+    throughput_tps:
+      op: scale
+      factor: 0.85
+  - actions: [SwitchHw, Evict]
+    kv_cache_bytes:
+      op: set_tau
+      value: 1.5
+
+passive_dynamics:
+  cpu_cluster_thermal_c:
+    baseline: 42.0
+    tau_s: 20.0
+    heating:
+      engine_cpu_pct_coeff: 0.05
+      cpu_freq_mhz_exp: 1.6
+
+  gpu_cluster_thermal_c:
+    baseline: 44.0
+    tau_s: 18.0
+    heating:
+      engine_gpu_pct_coeff: 0.09
+      gpu_freq_mhz_exp: 1.4
+
+  thermal_coupling:
+    cpu_to_gpu: 0.15
+    gpu_to_cpu: 0.12
+
+  thermal_c:
+    expr: "max(cpu_cluster_thermal_c, gpu_cluster_thermal_c) + 0.2 * memory_bw_utilization_pct / 100.0"
+
+  memory_bw_utilization_pct:
+    expr: "cpu_freq_mhz / cpu_max_freq_mhz * 0.3 + gpu_freq_mhz / gpu_max_freq_mhz * 0.7"
+    tau_s: 0.5
+
+  kv_cache_bytes:
+    growth_per_token:
+      f16: 131072
+      q8: 65536
+      q4: 32768
+    applies_when: "phase == \"decode\" || phase == \"prefill\""
+
+dvfs:
+  cpu:
+    soft_threshold_c: 78.0
+    hard_threshold_c: 95.0
+    k_thermal: 0.08
+    tau_s: 0.2
+  gpu:
+    soft_threshold_c: 72.0
+    hard_threshold_c: 90.0
+    k_thermal: 0.10
+    tau_s: 0.3
+
+derived:
+  # Phase 2: phase_throughput 내장 함수 사용.
+  # 인자: (phase, active_device, partition_ratio,
+  #         cpu_freq_mhz/cpu_max_freq_mhz, gpu_freq_mhz/gpu_max_freq_mhz,
+  #         memory_bw_utilization_pct,
+  #         base_tps_decode_gpu, base_tps_decode_cpu,
+  #         base_tps_decode_partition, base_tps_prefill_gpu)
+  throughput_tps:
+    expr: >-
+      phase_throughput(phase, active_device, partition_ratio,
+                       cpu_freq_mhz / cpu_max_freq_mhz,
+                       gpu_freq_mhz / gpu_max_freq_mhz,
+                       memory_bw_utilization_pct,
+                       base_tps_decode_gpu, base_tps_decode_cpu,
+                       base_tps_decode_partition, base_tps_prefill_gpu) *
+      throttle_factor(throttle_delay_ms) *
+      skip_boost(skip_ratio)
+    tau_s: 0.0
+  tbt_ms:
+    expr: "1000.0 / max(throughput_tps, 0.1)"
+    tau_s: 0.0
+  latency_degradation:
+    expr: "max(0.0, (tbt_target_ms - tbt_ms) / max(tbt_target_ms, 1.0))"
+    tau_s: 0.0
+
+external_injections:
+  - t_start: 10.0
+    duration: 5.0
+    var: external_cpu_pct
+    op: add
+    delta: 40.0
+    tau_s: 0.5
+  - t_start: 30.0
+    duration: 10.0
+    var: device_memory_used_mb
+    op: add
+    delta: 524288.0
+    tau_s: 0.0
+
+observation:
+  heartbeat:
+    interval_s: 1.0
+    noise:
+      self_cpu_pct:
+        sigma: 0.01
+        seed_key: "hb.cpu"
+      throughput_tps:
+        sigma: 0.3
+        seed_key: "hb.tps"
+  signals:
+    memory:
+      source: os_probe
+      poll_interval_s: 0.5
+      noise:
+        available_bytes:
+          sigma_mb: 8.0
+          seed_key: "sig.mem"
+    compute:
+      source: os_probe
+      poll_interval_s: 0.25
+      noise:
+        cpu_usage_pct:
+          sigma: 0.5
+          seed_key: "sig.cpu"
+    thermal:
+      source: os_probe
+      poll_interval_s: 1.0
+      noise:
+        temperature_mc:
+          sigma_mc: 200.0
+          seed_key: "sig.therm"
+    energy:
+      source: os_probe
+      poll_interval_s: 2.0
+
+rng_seed: ~

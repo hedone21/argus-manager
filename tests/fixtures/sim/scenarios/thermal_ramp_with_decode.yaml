@@ -1,0 +1,43 @@
+# thermal_ramp_with_decode.yaml
+#
+# 시나리오: decode 실행 중 GPU 클러스터 과열 → DVFS throttle → 정책 반응
+# 목적: ThermalAlert 신호가 올라오고 정책이 SwitchHw/Throttle 등을 선택하는지 검증.
+#
+# 예상 동작:
+#   t=0~5s  : gpu_cluster_thermal_c=68 → 점진적 상승 (passive heating)
+#   t=5~20s : external injection으로 GPU util 목표값 상승 → 온도 가속 상승
+#   t>10s   : gpu_cluster_thermal_c > soft_threshold(72) → DVFS 발동, freq 하락
+#             → ThermalAlert Warning/Critical 신호 발생
+#             → thermal_switch_backend.lua: SwitchHw(cpu) 또는 Throttle 반환
+#
+# rng_seed=42 → 결정론
+
+extends: ../baseline.yaml
+
+rng_seed: 42
+
+initial_state:
+  phase: "decode"
+  # GPU 온도를 DVFS soft threshold 근처에서 시작
+  gpu_cluster_thermal_c: 68.0
+  cpu_cluster_thermal_c: 52.0
+  thermal_c: 68.0
+  # GPU 고부하 decode
+  engine_gpu_pct: 85.0
+  gpu_freq_mhz: 1050
+
+external_injections:
+  # t=5s부터 20s 동안 GPU util 96% 목표로 서서히 상승 (tau=3s)
+  - t_start: 5.0
+    duration: 25.0
+    var: engine_gpu_pct
+    op: set
+    delta: 96.0
+    tau_s: 3.0
+  # t=8s부터 external GPU 부하도 증가 (다른 앱 경쟁, tau=2s)
+  - t_start: 8.0
+    duration: 22.0
+    var: external_gpu_pct
+    op: set
+    delta: 20.0
+    tau_s: 2.0

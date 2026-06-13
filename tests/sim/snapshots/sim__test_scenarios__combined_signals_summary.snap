@@ -1,0 +1,25 @@
+---
+source: manager/tests/sim/test_scenarios.rs
+expression: summary
+---
+duration_s: 20
+heartbeat_count: 20
+signal_count_by_kind:
+  compute_guidance: 80
+  energy_constraint: 10
+  memory_pressure: 40
+  thermal_alert: 20
+directive_count: 32
+directive_kinds:
+  KvEvictSliding: 16
+  RequestQcf: 16
+first_directive_at_s: 0.5
+state_final:
+  kv_cache_bytes_mib: 41.49
+  device_memory_used_mb: 7000
+  engine_cpu_pct: 30
+  engine_gpu_pct: 65
+  cpu_freq_ratio: 1
+  gpu_freq_ratio: 1
+  thermal_c: 42
+  throughput_tps: 16.65

@@ -1,0 +1,32 @@
+---
+source: manager/tests/sim/test_scenarios.rs
+expression: formatted
+---
+kv.evict_h2o:
+  - 0.034
+  - -0
+  - 0.126
+  - 0.031
+  - 0.002
+  - 0
+kv.evict_sliding:
+  - 0.045
+  - -0.002
+  - 0.127
+  - 0.044
+  - -0.003
+  - 0
+kv.merge_d2o:
+  - 0.03
+  - -0.001
+  - 0.084
+  - 0.032
+  - 0.007
+  - 0
+kv.quant_dynamic:
+  - 0
+  - 0.005
+  - 0.077
+  - 0.002
+  - -0.007
+  - 0

@@ -1,0 +1,5 @@
+# extends 테스트용: baseline을 상속하여 cpu_max_freq_mhz만 override
+extends: baseline.yaml
+
+initial_state:
+  cpu_max_freq_mhz: 2800

@@ -1,0 +1,23 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*~
+.idea/
+.vscode/
+
+# Environment
+.env
+
+# AI agent / internal working artifacts (keep out of the public repo)
+.agent/
+.claude/
+**/handoff_*.md
+**/HANDOFF*.md
+*.handoff.md
+.cursor/

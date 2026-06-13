@@ -1,0 +1,101 @@
+# s25_galaxy.yaml — Galaxy S25 (Snapdragon 8 Elite / Adreno 750) 디바이스 preset.
+#
+# baseline.yaml을 상속하여 S25 관련 값만 override한다.
+# 값은 공개 spec + 내부 프로파일링 추정치. 정확한 calibration은 후속 작업(K).
+# "TODO(K):" 주석이 붙은 필드는 실측 기반 refit이 필요하다.
+#
+# 관련 문서:
+#   docs/42_policy_simulator_guide.md  — 시뮬레이터 사용 가이드
+#   docs/00_build_guide.md             — 빌드/배포 가이드
+
+extends: baseline.yaml
+
+initial_state:
+  # ── RAM: Galaxy S25 기본 모델 12 GB LPDDR5X ──────────────────────────────
+  device_memory_total_mb: 12288
+  # 일반 사용 중 OS + 다른 앱이 6-9 GB 점유. 중간값 추정.
+  # TODO(K): 실기 측정 후 교체 필요.
+  device_memory_used_mb: 8192
+
+  # ── GPU (Adreno 750) ──────────────────────────────────────────────────────
+  # 공개 spec 기준 peak ~1.1 GHz.
+  gpu_max_freq_mhz: 1100
+  gpu_min_freq_mhz: 300
+  # 정상 동작 대역 중간값 추정.
+  # TODO(K): 추론 중 실측 주파수로 교체 필요.
+  gpu_freq_mhz: 810
+
+  # ── CPU (Snapdragon 8 Elite big cluster) ────────────────────────────────
+  # prime 코어 공개 spec ~4.47 GHz 이나 보수적으로 4.2 GHz 적용.
+  cpu_max_freq_mhz: 4200
+  cpu_min_freq_mhz: 500
+  # 추론 부하 중 big cluster 평균 추정.
+  # TODO(K): 실측 후 교체 필요.
+  cpu_freq_mhz: 3000
+
+  # ── Thermal ───────────────────────────────────────────────────────────────
+  # Galaxy S25 실측 대기 온도 근사.
+  # TODO(K): 실기 idle/load 실측 후 교체 필요.
+  thermal_c: 36.0
+  cpu_cluster_thermal_c: 38.0
+  gpu_cluster_thermal_c: 40.0
+  # S25 실측 throttle 진입 온도 근사.
+  # TODO(K): 실기 throttling 시작 온도 재확인 필요.
+  throttle_threshold_c: 82.0
+
+  # ── Throughput 추정치 (Llama 3.2 1B, F16/Q4_0, Galaxy S25) ───────────────
+  # 내부 프로파일링 결과 근사. Calibration 전이므로 보수적 추정치.
+  # TODO(K): 실기 `generate --profile` 결과로 refit 필요.
+  base_tps_decode_gpu: 18.5       # F16 GEMV + flash attn 경로 실측 근사
+  base_tps_decode_cpu: 5.2        # 6-thread NEON dotprod 실측 근사
+  base_tps_decode_partition: 21.0 # partition_ratio ~0.5 peak 추정 (0.3-0.7 구간)
+  base_tps_prefill_gpu: 160.0     # prefill GPU 처리량 추정
+
+dvfs:
+  cpu:
+    soft_threshold_c: 75.0
+    hard_threshold_c: 88.0
+    # Snapdragon 8 Elite의 비교적 공격적인 thermal throttling 특성.
+    # TODO(K): 실기 throttle 곡선 측정 후 교체 필요.
+    k_thermal: 0.12
+    tau_s: 0.2
+  gpu:
+    soft_threshold_c: 70.0
+    hard_threshold_c: 85.0
+    # TODO(K): 실기 GPU freq vs thermal 측정 후 교체 필요.
+    k_thermal: 0.15
+    tau_s: 0.3
+
+passive_dynamics:
+  cpu_cluster_thermal_c:
+    baseline: 38.0
+    # 8 Elite 방열 성능 감안 — baseline(20s)보다 약간 빠른 방열 추정.
+    # TODO(K): 실기 냉각 곡선 측정 후 교체 필요.
+    tau_s: 18.0
+    heating:
+      engine_cpu_pct_coeff: 0.05
+      cpu_freq_mhz_exp: 1.6
+  gpu_cluster_thermal_c:
+    baseline: 40.0
+    # TODO(K): 실기 GPU 방열 곡선 측정 후 교체 필요.
+    tau_s: 16.0
+    heating:
+      engine_gpu_pct_coeff: 0.09
+      gpu_freq_mhz_exp: 1.4
+  thermal_coupling:
+    # SoC 다이 상 CPU-GPU 근접으로 baseline보다 높은 열전도 추정.
+    # TODO(K): 실기 dual-load 시나리오로 coupling 계수 측정 필요.
+    cpu_to_gpu: 0.18
+    gpu_to_cpu: 0.15
+  # 아래 필드들은 baseline에서 상속하며 override 불필요.
+  thermal_c:
+    expr: "max(cpu_cluster_thermal_c, gpu_cluster_thermal_c) + 0.2 * memory_bw_utilization_pct / 100.0"
+  memory_bw_utilization_pct:
+    expr: "cpu_freq_mhz / cpu_max_freq_mhz * 0.3 + gpu_freq_mhz / gpu_max_freq_mhz * 0.7"
+    tau_s: 0.5
+  kv_cache_bytes:
+    growth_per_token:
+      f16: 131072
+      q8: 65536
+      q4: 32768
+    applies_when: "phase == \"decode\" || phase == \"prefill\""

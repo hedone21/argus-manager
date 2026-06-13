@@ -1,0 +1,5 @@
+# 순환 참조 테스트용: b → a (circular)
+extends: circular_a.yaml
+
+initial_state:
+  cpu_max_freq_mhz: 2800
