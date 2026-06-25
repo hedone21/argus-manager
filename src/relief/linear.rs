@@ -258,6 +258,12 @@ fn default_relief(action: &ActionId) -> ReliefVector {
             thermal: 0.0,
             latency: -0.2,
         },
+        ActionId::KvReencodeFormat => ReliefVector {
+            compute: 0.0,
+            memory: 0.5,
+            thermal: 0.0,
+            latency: 0.0,
+        },
     }
 }
 

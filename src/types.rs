@@ -30,6 +30,8 @@ mod hierarchical_types {
         KvMergeD2o,
         #[serde(rename = "kv.quant_dynamic")]
         KvQuantDynamic,
+        #[serde(rename = "kv.reencode_format")]
+        KvReencodeFormat,
         #[serde(rename = "weight.skip")]
         LayerSkip,
         SwapWeights,
@@ -47,6 +49,7 @@ mod hierarchical_types {
                 ActionId::KvEvictStreaming => "kv.evict_streaming",
                 ActionId::KvMergeD2o => "kv.merge_d2o",
                 ActionId::KvQuantDynamic => "kv.quant_dynamic",
+                ActionId::KvReencodeFormat => "kv.reencode_format",
                 ActionId::LayerSkip => "weight.skip",
                 ActionId::SwapWeights => "swap_weights",
             }
@@ -64,6 +67,7 @@ mod hierarchical_types {
                 "kv.evict_streaming" => Some(ActionId::KvEvictStreaming),
                 "kv.merge_d2o" => Some(ActionId::KvMergeD2o),
                 "kv.quant_dynamic" => Some(ActionId::KvQuantDynamic),
+                "kv.reencode_format" => Some(ActionId::KvReencodeFormat),
                 "weight.skip" => Some(ActionId::LayerSkip),
                 "swap_weights" => Some(ActionId::SwapWeights),
                 _ => None,
@@ -81,6 +85,7 @@ mod hierarchical_types {
                 ActionId::KvEvictStreaming,
                 ActionId::KvMergeD2o,
                 ActionId::KvQuantDynamic,
+                ActionId::KvReencodeFormat,
                 ActionId::LayerSkip,
                 ActionId::SwapWeights,
             ]
@@ -96,6 +101,7 @@ mod hierarchical_types {
                 | ActionId::KvEvictStreaming
                 | ActionId::KvMergeD2o
                 | ActionId::KvQuantDynamic
+                | ActionId::KvReencodeFormat
                 | ActionId::SwapWeights => Domain::Memory,
             }
         }
@@ -116,6 +122,7 @@ mod hierarchical_types {
                 EngineCommand::KvStreaming { .. } => Some(ActionId::KvEvictStreaming),
                 EngineCommand::KvMergeD2o { .. } => Some(ActionId::KvMergeD2o),
                 EngineCommand::KvQuantDynamic { .. } => Some(ActionId::KvQuantDynamic),
+                EngineCommand::KvReencodeFormat { .. } => Some(ActionId::KvReencodeFormat),
                 EngineCommand::KvOffload { .. } => Some(ActionId::KvOffloadDisk),
                 _ => None,
             }

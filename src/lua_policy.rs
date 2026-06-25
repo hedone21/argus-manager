@@ -975,6 +975,7 @@ fn engine_command_to_action_name(cmd: &EngineCommand) -> String {
         EngineCommand::KvStreaming { .. } => "kv.evict_streaming",
         EngineCommand::KvMergeD2o { .. } => "kv.merge_d2o",
         EngineCommand::KvQuantDynamic { .. } => "kv.quant_dynamic",
+        EngineCommand::KvReencodeFormat { .. } => "kv.reencode_format",
         EngineCommand::KvOffload { .. } => "kv_offload",
         EngineCommand::SwitchHw { .. } => "switch_hw",
         EngineCommand::RestoreDefaults => "restore_defaults",
@@ -1085,6 +1086,12 @@ fn parse_single_action(action_type: &str, entry: &Table) -> LuaResult<EngineComm
         "kv.quant_dynamic" => {
             let target_bits: u8 = entry.get("target_bits")?;
             EngineCommand::KvQuantDynamic { target_bits }
+        }
+        "kv.reencode_format" => {
+            // format 은 engine-registered KV format 명("q4_0"/"f16"/...). 생략 시 q4_0 floor
+            // (Rust pipeline emitter 와 동일 기본값).
+            let format: String = entry.get("format").unwrap_or_else(|_| "q4_0".to_string());
+            EngineCommand::KvReencodeFormat { format }
         }
         "switch_hw" => {
             let device: String = entry.get("device")?;

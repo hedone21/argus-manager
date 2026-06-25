@@ -1,5 +1,5 @@
 [policy.exclusion_groups]
-kv_quality = ["kv.evict_sliding", "kv.evict_h2o", "kv.merge_d2o", "kv.quant_dynamic"]
+kv_quality = ["kv.evict_sliding", "kv.evict_h2o", "kv.merge_d2o", "kv.quant_dynamic", "kv.reencode_format"]
 
 [compute]
 # gpu_sysfs_path = "/sys/kernel/gpu/gpu_busy_percentage"  # Adreno 기본값. 없으면 자동 탐색.
@@ -32,5 +32,6 @@ throttle = [0.0, 0.3, 0.0, 0.2, -0.2, 0.0]
 set_target_tbt = [0.0, 0.2, 0.0, 0.1, -0.1, 0.0]
 "weight.skip" = [0.2, 0.1, 0.0, 0.1, -0.1, 0.0]
 "kv.quant_dynamic" = [0.0, 0.0, 0.5, 0.0, 0.0, 0.0]
+"kv.reencode_format" = [0.0, 0.0, 0.5, 0.0, 0.0, 0.0]
 "kv.merge_d2o" = [0.1, 0.0, 0.3, 0.1, 0.0, 0.0]
 set_partition_ratio = [0.3, -0.2, 0.0, 0.1, 0.0, 0.0]

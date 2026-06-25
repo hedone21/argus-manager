@@ -222,6 +222,11 @@ impl EngineState_ {
                 println!("  → KvQuantDynamic: target_bits={}", target_bits);
                 CommandResult::Ok
             }
+            EngineCommand::KvReencodeFormat { format } => {
+                self.activate_action("kv.reencode_format");
+                println!("  → KvReencodeFormat: format={}", format);
+                CommandResult::Ok
+            }
             EngineCommand::Throttle { delay_ms } => {
                 self.throttle_delay_ms = *delay_ms;
                 self.activate_action("throttle");
