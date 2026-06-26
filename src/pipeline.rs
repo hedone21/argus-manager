@@ -775,6 +775,7 @@ mod hierarchical {
                     ActionId::KvEvictStreaming => [0.0, 0.0, 0.7, 0.0, 0.0, 0.0],
                     ActionId::KvMergeD2o => [0.0, 0.0, 0.6, 0.0, 0.0, 0.0],
                     ActionId::KvQuantDynamic => [0.0, 0.0, 0.5, 0.0, 0.0, 0.0],
+                    ActionId::KvReencodeFormat => [0.0, 0.0, 0.5, 0.0, 0.0, 0.0],
                     ActionId::LayerSkip => [0.0, 0.4, 0.0, 0.2, 0.0, 0.0],
                     ActionId::SwapWeights => [0.0, 0.0, 0.5, 0.0, 0.0, 0.0],
                 };
@@ -835,6 +836,14 @@ mod hierarchical {
             (ActionId::KvQuantDynamic, Operation::Apply(params)) => {
                 let target_bits = params.values.get("target_bits").copied().unwrap_or(4.0) as u8;
                 Some(EngineCommand::KvQuantDynamic { target_bits })
+            }
+            (ActionId::KvReencodeFormat, Operation::Apply(_)) => {
+                // W-FORMAT-HET L1-runtime: resident KV 를 host-reencodable q4_0 floor 로 다운그레이드.
+                // KvQuantDynamic 이 quant-window bit-width 를 바꾸는 데 비해, 이쪽은 StandardFormat
+                // per-layer 재인코딩 경로를 구동한다. format 은 q4_0 고정(uniform) — 추후 확장 가능.
+                Some(EngineCommand::KvReencodeFormat {
+                    format: "q4_0".to_string(),
+                })
             }
             (ActionId::LayerSkip, Operation::Apply(params)) => {
                 let skip_layers = params.values.get("skip_layers").copied().unwrap_or(1.0);

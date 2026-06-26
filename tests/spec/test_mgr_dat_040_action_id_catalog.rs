@@ -38,13 +38,13 @@ fn test_mgr_dat_040_from_str_empty_is_none() {
 
 // ── all() 목록 ──
 
-/// ActionId::all()이 정확히 10개를 포함해야 한다 (회귀 방지).
+/// ActionId::all()이 정확히 11개를 포함해야 한다 (회귀 방지). KvReencodeFormat 추가로 10→11.
 #[test]
-fn test_mgr_dat_040_all_count_is_ten() {
+fn test_mgr_dat_040_all_count_is_eleven() {
     assert_eq!(
         ActionId::all().len(),
-        10,
-        "ActionId::all() must contain exactly 10 variants"
+        11,
+        "ActionId::all() must contain exactly 11 variants"
     );
 }
 
@@ -57,7 +57,7 @@ fn test_mgr_dat_040_all_contains_swap_weights() {
     );
 }
 
-/// ActionId::all()이 정확히 10개 variant를 포함하는지 set 비교.
+/// ActionId::all()이 정확히 11개 variant를 포함하는지 set 비교.
 #[test]
 fn test_mgr_dat_040_all_exact_set() {
     let expected: HashSet<ActionId> = [
@@ -69,6 +69,7 @@ fn test_mgr_dat_040_all_exact_set() {
         ActionId::KvEvictStreaming,
         ActionId::KvMergeD2o,
         ActionId::KvQuantDynamic,
+        ActionId::KvReencodeFormat,
         ActionId::LayerSkip,
         ActionId::SwapWeights,
     ]
