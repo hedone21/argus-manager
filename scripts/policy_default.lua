@@ -50,6 +50,28 @@ local AXES = { "memory", "gpu", "thermal", "latency" }
 -- makes EXIT mean something.
 local relieving = {}
 
+-- The budget already in force, or nil outside a relief window.
+--
+-- A window only ever TIGHTENS. The engine's budget is a fraction of what the context would
+-- occupy uncompressed, and eviction is not reversible, so a LOOSER value inside one window
+-- names a state the cache is already in -- it asks for nothing. Sending it anyway is not
+-- free: the engine scores every candidate technique before it can decide there is nothing
+-- to remove, and that scoring is the expensive half of a decision.
+--
+-- It is also not rare. `decide` runs every tick while relieving, and a pressure signal that
+-- moves faster than one B_STEP walks B_kv up and down its ramp; every value that DIFFERS
+-- from the last one clears both the manager's byte-identical dedup and the engine's
+-- repeat gate. Archived Galaxy S25 runs show exactly this: one 867-tick cell emitted 111
+-- distinct budgets (0.5, 0.25, 0.9, 0.85, 0.9, 0.85, 0.6, 0.7, ...) driven by a thermal
+-- reading swinging 40.3-63.8 C across a 35->50 C normalization band. B_STEP is ~1.15 C of
+-- that band, far below the per-tick swing, so quantizing the budget does not damp it.
+--
+-- Loosening happens by LEAVING the window (`restore_defaults`), which is the only action
+-- that actually gives the cache back. Because the ramp has (B_MAX-B_MIN)/B_STEP + 1 = 14
+-- levels and this makes the sequence monotone, one window can now emit at most 14
+-- directives no matter how long it lasts or how badly the signal dithers.
+local applied
+
 local function normalize(ctx)
   local p = ctx.pressure
   return {
@@ -99,6 +121,7 @@ function decide(ctx)
   if relieving[a] then
     if p[a] < EXIT[a] then
       relieving[a] = nil
+      applied = nil
       return { type = "restore_defaults" }
     end
   elseif p[a] < ENTER[a] then
@@ -107,5 +130,11 @@ function decide(ctx)
   end
 
   relieving[a] = true
-  return { type = "kv.compress", budget = B_kv(p[a], a) }
+  local budget = B_kv(p[a], a)
+  if applied and budget >= applied then
+    -- Already at least this tight, and eviction does not run backwards. See `applied`.
+    return nil
+  end
+  applied = budget
+  return { type = "kv.compress", budget = budget }
 end
