@@ -6,7 +6,8 @@ use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use argus_shared::{EngineDirective, EngineMessage, ManagerMessage, SystemSignal};
+use crate::signal::SystemSignal;
+use argus_shared::{EngineDirective, EngineMessage, ManagerMessage};
 
 use crate::channel::EngineReceiver;
 use crate::emitter::Emitter;
@@ -200,7 +201,11 @@ impl Emitter for UnixSocketChannel {
     fn emit(&mut self, signal: &SystemSignal) -> anyhow::Result<()> {
         self.ensure_connected();
         if !matches!(self.state, ConnectionState::Connected { .. }) {
-            return Ok(()); // 클라이언트 없음 — 치명적이지 않음
+            // Not fatal, but not silent either: the caller treats `Ok(())` as sent, and
+            // the deduplicator has already recorded it, so an unlogged drop here
+            // suppresses the identical retry for the whole cooldown.
+            log::warn!("no engine connected — dropping the outbound message");
+            return Ok(());
         }
         if let Err(e) = self.write_signal(signal) {
             log::warn!("[UnixSocketChannel] Write error (signal): {}", e);
@@ -219,7 +224,11 @@ impl Emitter for UnixSocketChannel {
     fn emit_directive(&mut self, directive: &EngineDirective) -> anyhow::Result<()> {
         self.ensure_connected();
         if !matches!(self.state, ConnectionState::Connected { .. }) {
-            return Ok(()); // 클라이언트 없음 — 치명적이지 않음
+            // Not fatal, but not silent either: the caller treats `Ok(())` as sent, and
+            // the deduplicator has already recorded it, so an unlogged drop here
+            // suppresses the identical retry for the whole cooldown.
+            log::warn!("no engine connected — dropping the outbound message");
+            return Ok(());
         }
         let msg = ManagerMessage::Directive(directive.clone());
         if let Err(e) = self.write_manager_message(&msg) {
@@ -288,7 +297,11 @@ fn spawn_reader(mut stream: UnixStream, inbox_tx: mpsc::SyncSender<EngineMessage
                         }
                     }
                     Err(e) => {
-                        log::debug!("[engine-reader] Read error: {} — exiting", e);
+                        log::error!(
+                        "[engine-reader] engine link lost: {} — no further heartbeats or responses \
+                         will be received on this connection",
+                        e
+                    );
                         break; // EOF 또는 I/O 에러
                     }
                 }
@@ -334,7 +347,8 @@ fn read_engine_message(stream: &mut UnixStream) -> anyhow::Result<EngineMessage>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use argus_shared::{EngineCapability, EngineState, EngineStatus, Level, ResourceLevel};
+    use crate::signal::Level;
+    use argus_shared::{EngineState, EngineStatus, Phase};
     use std::io::Write as IoWrite;
     use std::os::unix::net::UnixStream as StdUnixStream;
 
@@ -344,41 +358,25 @@ mod tests {
         (dir, path)
     }
 
-    fn make_heartbeat(kv: f32, device: &str) -> EngineMessage {
+    fn make_heartbeat(_kv: f32, _device: &str) -> EngineMessage {
         EngineMessage::Heartbeat(EngineStatus {
-            active_device: device.to_string(),
-            compute_level: ResourceLevel::Normal,
-            actual_throughput: 15.0,
-            memory_level: ResourceLevel::Normal,
-            kv_cache_bytes: 0,
-            kv_cache_tokens: 0,
-            kv_cache_utilization: kv,
-            memory_lossless_min: 1.0,
-            memory_lossy_min: 0.01,
+            kv_cache_bytes: 1024,
+            kv_cache_budget_bytes: 4096,
+            kv_cache_tokens: 32,
+            tbt_ms: 12.5,
+            phase: Phase::Decode,
             state: EngineState::Running,
-            tokens_generated: 0,
-            available_actions: vec![],
-            active_actions: vec![],
-            eviction_policy: "none".to_string(),
-            kv_dtype: "f16".to_string(),
-            skip_ratio: 0.0,
-            phase: String::new(),
-            prefill_pos: 0,
-            prefill_total: 0,
-            partition_ratio: 0.0,
-            self_cpu_pct: 0.0,
-            self_gpu_pct: 0.0,
         })
     }
 
     fn make_capability() -> EngineMessage {
-        EngineMessage::Capability(EngineCapability {
-            available_devices: vec!["cpu".into(), "opencl".into()],
-            active_device: "opencl".into(),
-            max_kv_tokens: 2048,
-            bytes_per_kv_token: 256,
-            num_layers: 16,
-            ..Default::default()
+        EngineMessage::Heartbeat(EngineStatus {
+            kv_cache_bytes: 1024,
+            kv_cache_budget_bytes: 4096,
+            kv_cache_tokens: 32,
+            tbt_ms: 12.5,
+            phase: Phase::Decode,
+            state: EngineState::Running,
         })
     }
 
@@ -422,8 +420,8 @@ mod tests {
         let msg = try_recv_with_retry(&mut channel, 50).expect("Expected heartbeat");
         match msg {
             EngineMessage::Heartbeat(s) => {
-                assert!((s.kv_cache_utilization - 0.75).abs() < 1e-5);
-                assert_eq!(s.active_device, "opencl");
+                assert_eq!(s.kv_cache_bytes, 1024);
+                assert_eq!(s.kv_cache_tokens, 32);
             }
             _ => panic!("Expected Heartbeat"),
         }
@@ -547,13 +545,13 @@ mod tests {
 
         send_engine_msg(&mut client, &make_capability());
 
-        let msg = try_recv_with_retry(&mut channel, 50).expect("Expected capability");
+        let msg = try_recv_with_retry(&mut channel, 50).expect("Expected heartbeat");
         match msg {
-            EngineMessage::Capability(c) => {
-                assert_eq!(c.active_device, "opencl");
-                assert_eq!(c.num_layers, 16);
+            EngineMessage::Heartbeat(status) => {
+                assert_eq!(status.kv_cache_bytes, 1024);
+                assert_eq!(status.kv_cache_budget_bytes, 4096);
             }
-            _ => panic!("Expected Capability"),
+            other => panic!("Expected Heartbeat, got {other:?}"),
         }
     }
 
@@ -582,7 +580,7 @@ mod tests {
 
         let directive = EngineDirective {
             seq_id: 99,
-            commands: vec![EngineCommand::KvEvictSliding { keep_ratio: 0.5 }],
+            commands: vec![EngineCommand::KvCompress { budget: 0.5 }],
         };
         channel.emit_directive(&directive).unwrap();
 

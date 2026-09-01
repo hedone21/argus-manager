@@ -335,20 +335,7 @@ impl Simulator {
             }
         }
 
-        // check_qcf_timeout — 매 tick 호출
-        if let Some(dir) = self.policy.check_qcf_timeout() {
-            // qcf timeout directive는 trigger signal 없이 발동된다.
-            // trajectory에 Custom 이벤트로 기록하고 apply한다.
-            self.apply_directive(&dir)?;
-            self.trajectory
-                .record_custom(tick_end, "qcf_timeout_directive");
-        }
-
-        // Relief 업데이트 + observation overrun 드레인 — 관측성 훅.
-        #[cfg(feature = "lua")]
-        for ev in crate::pipeline::drain_relief_updates_helper(self.policy.as_mut()) {
-            self.trajectory.record_relief_update(tick_end, &ev);
-        }
+        // observation overrun 드레인 — 관측성 훅.
         let overrun_total = crate::pipeline::get_observation_overrun_count(self.policy.as_mut());
         if overrun_total > self.last_overrun_count {
             self.last_overrun_count = overrun_total;
@@ -469,18 +456,13 @@ fn schedule_periodic_from(
     clock.schedule_periodic(kind_fn, first, period, until);
 }
 
-/// EngineCommand가 관측 가능한 action이면 canonical 이름을 반환한다.
+/// Canonical name for a command the simulator tracks as an applied action.
+///
+/// The v1 vocabulary distinguished which technique had been asked for; there is one
+/// command now, so a compression is just a compression.
 fn observable_action_name(cmd: &EngineCommand) -> Option<String> {
     match cmd {
-        EngineCommand::KvEvictH2o { .. } => Some("kv.evict_h2o".to_string()),
-        EngineCommand::KvEvictSliding { .. } => Some("kv.evict_sliding".to_string()),
-        EngineCommand::KvMergeD2o { .. } => Some("kv_evict_d2o".to_string()),
-        EngineCommand::Throttle { .. } => Some("throttle".to_string()),
-        EngineCommand::SwitchHw { .. } => Some("switch_hw".to_string()),
-        EngineCommand::SetPartitionRatio { .. } => Some("set_partition_ratio".to_string()),
-        EngineCommand::LayerSkip { .. } => Some("weight.skip".to_string()),
-        EngineCommand::KvQuantDynamic { .. } => Some("kv.quant_dynamic".to_string()),
-        // RestoreDefaults, RequestQcf, SetTargetTbt 등은 관측 불필요
-        _ => None,
+        EngineCommand::KvCompress { .. } => Some("kv.compress".to_string()),
+        EngineCommand::RestoreDefaults | EngineCommand::Suspend | EngineCommand::Resume => None,
     }
 }

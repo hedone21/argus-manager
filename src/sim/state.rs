@@ -260,39 +260,14 @@ impl EngineStateModel {
     }
 
     fn apply_command(&mut self, cmd: &EngineCommand, state: &mut PhysicalState) {
+        let _ = state;
         match cmd {
-            // ── One-shot 액션 (KV cache eviction/quantization) ──
-            // 즉시 적용 후 종료되는 액션이므로 active_actions에 등록하지 않는다.
-            // 등록하면 is_active_any() 체크가 재발행을 영구 차단하여
-            // 메모리가 계속 높아도 추가 eviction이 일어나지 않는 문제가 발생한다.
-            EngineCommand::KvEvictH2o { keep_ratio } => {
-                self.last_evict_ratio = Some(*keep_ratio as f64);
-            }
-            EngineCommand::KvEvictSliding { keep_ratio } => {
-                self.last_evict_ratio = Some(*keep_ratio as f64);
-            }
-            EngineCommand::KvMergeD2o { keep_ratio } => {
-                self.last_evict_ratio = Some(*keep_ratio as f64);
-            }
-            EngineCommand::KvQuantDynamic { target_bits } => {
-                self.kv_quant_bits = Some(*target_bits);
-                state.kv_dtype = bits_to_dtype(*target_bits);
-            }
-            // ── Persistent 모드 액션 ──
-            // RestoreDefaults가 올 때까지 유지되는 액션. active_actions에 등록.
-            // 이름은 Lua 정책과 일치하도록 snake_case 사용.
-            EngineCommand::Throttle { delay_ms } => {
-                self.throttle_delay_ms = *delay_ms as f64;
-                add_action(&mut self.active_actions, "throttle");
-            }
-            EngineCommand::SwitchHw { device } => {
-                self.last_switch_device = Some(device.clone());
-                self.active_device = device.clone();
-                add_action(&mut self.active_actions, "switch_hw");
-            }
-            EngineCommand::SetPartitionRatio { ratio } => {
-                self.partition_ratio = *ratio as f64;
-                add_action(&mut self.active_actions, "set_partition_ratio");
+            // One-shot: applied and done, so it is NOT registered in `active_actions`.
+            // Registering it would make `is_active_any()` block re-issue forever, and a
+            // cache that is still too big after one compression could never be
+            // compressed again.
+            EngineCommand::KvCompress { budget } => {
+                self.last_evict_ratio = Some(*budget as f64);
             }
             EngineCommand::RestoreDefaults => {
                 self.active_actions.clear();
@@ -301,15 +276,8 @@ impl EngineStateModel {
                 self.partition_ratio = 0.0;
                 self.last_evict_ratio = None;
             }
-            EngineCommand::LayerSkip { skip_ratio } => {
-                self.skip_ratio = *skip_ratio as f64;
-                add_action(&mut self.active_actions, "weight.skip");
-            }
-            EngineCommand::SetTargetTbt { target_ms } => {
-                self.tbt_target_ms = *target_ms as f64;
-            }
-            // 기타 명령은 물리 시뮬레이터에서 직접 처리하지 않음
-            _ => {}
+            // The simulator models resource physics, not the engine's lifecycle.
+            EngineCommand::Suspend | EngineCommand::Resume => {}
         }
     }
 
@@ -381,11 +349,12 @@ mod tests {
         let mut engine = EngineStateModel::from_config(&init);
         let mut state = PhysicalState::from_config(&init);
 
-        engine.apply_command(&EngineCommand::Throttle { delay_ms: 100 }, &mut state);
-        assert!(!engine.active_actions.is_empty());
+        engine.apply_command(&EngineCommand::KvCompress { budget: 0.5 }, &mut state);
+        assert_eq!(engine.last_evict_ratio, Some(0.5));
 
         engine.apply_command(&EngineCommand::RestoreDefaults, &mut state);
         assert!(engine.active_actions.is_empty());
+        assert_eq!(engine.last_evict_ratio, None);
         assert_eq!(engine.throttle_delay_ms, 0.0);
     }
 

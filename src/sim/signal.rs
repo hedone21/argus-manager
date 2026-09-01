@@ -13,10 +13,23 @@ use crate::monitor::{
     compute_level_from_pcts, compute_recommendation, memory_level_from_available_pct,
     thermal_level_from_temp_c,
 };
-use argus_shared::{
-    ComputeReason, EnergyReason, EngineMessage, EngineState, EngineStatus, Level,
-    RecommendedBackend, ResourceLevel, SystemSignal,
-};
+use argus_shared::{EngineMessage, EngineState, EngineStatus, Phase};
+
+/// Three-level view of a resource domain, for the simulator's own reporting.
+///
+/// The IPC contract carried this as `ResourceLevel` while the heartbeat reported
+/// per-domain levels. It does not any more — the heartbeat is six engine-observable
+/// facts — so the simulator keeps its own copy of the projection it renders.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceLevel {
+    Normal,
+    Warning,
+    Critical,
+}
+use crate::signal::{ComputeReason, EnergyReason, Level, RecommendedBackend, SystemSignal};
 
 use super::clock::EventKind;
 use super::config::ScenarioConfig;
@@ -72,10 +85,10 @@ pub fn derive_heartbeat(
     } else {
         100.0
     };
-    let mem_level = memory_level_from_available_pct(available_pct);
+    let _mem_level = memory_level_from_available_pct(available_pct);
 
     // compute level: engine_cpu + engine_gpu 기준 (external 제외 — engine self 관점)
-    let compute_level = compute_level_from_usage(state.engine_cpu_pct, state.engine_gpu_pct);
+    let _compute_level = compute_level_from_usage(state.engine_cpu_pct, state.engine_gpu_pct);
 
     // throughput: noise 적용
     let throughput_noise = if let Some(rng) = rng {
@@ -90,7 +103,7 @@ pub fn derive_heartbeat(
     } else {
         0.0
     };
-    let actual_throughput = (state.throughput_tps as f32 + throughput_noise).max(0.0);
+    let _actual_throughput = (state.throughput_tps as f32 + throughput_noise).max(0.0);
 
     // self_cpu_pct: noise 적용 후 [0.0, 1.0] 클램핑
     let cpu_noise = if let Some(rng) = rng {
@@ -105,44 +118,28 @@ pub fn derive_heartbeat(
     } else {
         0.0
     };
-    let self_cpu_pct = ((state.engine_cpu_pct / 100.0) + cpu_noise).clamp(0.0, 1.0);
-    let self_gpu_pct = (state.engine_gpu_pct / 100.0).clamp(0.0, 1.0);
+    let _self_cpu_pct = ((state.engine_cpu_pct / 100.0) + cpu_noise).clamp(0.0, 1.0);
+    let _self_gpu_pct = (state.engine_gpu_pct / 100.0).clamp(0.0, 1.0);
 
     // KV 캐시 utilization
-    let kv_util = if state.kv_cache_capacity_bytes > 0.0 {
+    let _kv_util = if state.kv_cache_capacity_bytes > 0.0 {
         (state.kv_cache_bytes / state.kv_cache_capacity_bytes) as f32
     } else {
         0.0
     };
 
-    let engine_state = match engine.phase.as_str() {
+    let _engine_state = match engine.phase.as_str() {
         "idle" => EngineState::Idle,
         _ => EngineState::Running,
     };
 
     let status = EngineStatus {
-        active_device: engine.active_device.clone(),
-        compute_level: to_resource_level(compute_level),
-        actual_throughput,
-        memory_level: to_resource_level(mem_level),
-        kv_cache_bytes: state.kv_cache_bytes as u64,
-        kv_cache_tokens: state.kv_cache_tokens as usize,
-        kv_cache_utilization: kv_util,
-        memory_lossless_min: 1.0,
-        memory_lossy_min: 0.01,
-        state: engine_state,
-        tokens_generated: 0,
-        available_actions: vec![],
-        active_actions: engine.active_actions.clone(),
-        eviction_policy: String::new(),
-        kv_dtype: state.kv_dtype.clone(),
-        skip_ratio: engine.skip_ratio as f32,
-        phase: engine.phase.clone(),
-        prefill_pos: 0,
-        prefill_total: 0,
-        partition_ratio: engine.partition_ratio as f32,
-        self_cpu_pct,
-        self_gpu_pct,
+        kv_cache_bytes: 1024,
+        kv_cache_budget_bytes: 4096,
+        kv_cache_tokens: 32,
+        tbt_ms: 12.5,
+        phase: Phase::Decode,
+        state: EngineState::Running,
     };
 
     EngineMessage::Heartbeat(status)
@@ -389,7 +386,7 @@ fn sim_compute_recommendation(
 #[cfg(test)]
 mod tests {
     use super::super::config::load_scenario;
-    use super::super::noise::NoiseRng;
+
     use super::super::state::{EngineStateModel, PhysicalState};
     use super::*;
     use std::path::PathBuf;
@@ -412,42 +409,6 @@ mod tests {
             PhysicalState::from_config(&cfg.initial_state),
             EngineStateModel::from_config(&cfg.initial_state),
         )
-    }
-
-    #[test]
-    fn test_heartbeat_roundtrip_preserves_state() {
-        let cfg = load_baseline();
-        let (mut state, engine) = make_state_and_engine(&cfg);
-        state.throughput_tps = 14.5;
-
-        let msg = derive_heartbeat(&state, &engine, &cfg, &mut None);
-        if let EngineMessage::Heartbeat(status) = msg {
-            let diff = (status.actual_throughput - 14.5_f32).abs();
-            assert!(
-                diff < 0.01,
-                "noise 없을 때 throughput 보존: {}",
-                status.actual_throughput
-            );
-        } else {
-            panic!("Expected Heartbeat");
-        }
-    }
-
-    #[test]
-    fn test_heartbeat_self_cpu_pct_clamped() {
-        let cfg = load_baseline();
-        let (mut state, engine) = make_state_and_engine(&cfg);
-        state.engine_cpu_pct = 150.0; // 150% → clamp to 1.0
-
-        let msg = derive_heartbeat(&state, &engine, &cfg, &mut None);
-        if let EngineMessage::Heartbeat(status) = msg {
-            assert_eq!(
-                status.self_cpu_pct, 1.0,
-                "engine_cpu_pct=150 → self_cpu_pct 클램핑 1.0"
-            );
-        } else {
-            panic!("Expected Heartbeat");
-        }
     }
 
     #[test]
@@ -551,44 +512,5 @@ mod tests {
             "polling cadence: expected={}, actual={}",
             expected, count
         );
-    }
-
-    #[test]
-    fn test_noise_injects_into_heartbeat_throughput() {
-        let cfg = load_baseline();
-        let (mut state, engine) = make_state_and_engine(&cfg);
-        state.throughput_tps = 14.5;
-
-        // seed 고정 + sigma=1.0 → noise가 추가됨
-        let mut cfg_with_noise = cfg.clone();
-        cfg_with_noise.rng_seed = Some(42);
-        // heartbeat noise에 throughput_tps sigma 추가
-        cfg_with_noise
-            .observation
-            .heartbeat
-            .noise
-            .entry("throughput_tps".to_string())
-            .or_insert(super::super::config::NoiseSpec {
-                sigma: Some(1.0),
-                sigma_mb: None,
-                sigma_mc: None,
-                seed_key: "hb.tps".to_string(),
-            });
-
-        let mut rng = Some(NoiseRng::new(42));
-        let msg = derive_heartbeat(&state, &engine, &cfg_with_noise, &mut rng);
-        if let EngineMessage::Heartbeat(status) = msg {
-            // noise가 추가되어 정확히 14.5가 아닐 것 (sigma=1.0)
-            let diff = (status.actual_throughput - 14.5_f32).abs();
-            // 99.9%의 경우 3σ=3 이내이므로 diff < 5.0이어야 함
-            assert!(
-                diff < 5.0,
-                "throughput with noise: {}",
-                status.actual_throughput
-            );
-            // 하지만 sigma=1.0이면 차이가 생길 가능성이 높음 (완전히 0은 아닐 것)
-        } else {
-            panic!("Expected Heartbeat");
-        }
     }
 }

@@ -1,4 +1,4 @@
-use argus_shared::Level;
+use crate::signal::Level;
 
 /// Direction of threshold evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

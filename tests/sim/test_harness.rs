@@ -198,57 +198,19 @@ fn test_signal_cadence_respects_config() {
     );
 }
 
-/// 7. Evict directive 발동 시 3초 후 ObservationDue 이벤트 기록.
-#[test]
-fn test_directive_triggers_observation_due_schedule() {
-    use argus_shared::SystemSignal;
-
-    let cfg = load_baseline();
-
-    // memory signal 수신 시 Evict directive 반환하는 MockPolicy
-    let dir = EngineDirective {
-        seq_id: 1,
-        commands: vec![EngineCommand::KvEvictSliding { keep_ratio: 0.8 }],
-    };
-    let dir_clone = dir.clone();
-    let mut mock = MockPolicy::new();
-    mock.directive_on_signal = Some(Box::new(move |sig| {
-        if matches!(sig, SystemSignal::MemoryPressure { .. }) {
-            Some(dir_clone.clone())
-        } else {
-            None
-        }
-    }));
-
-    let policy = Box::new(mock);
-    let mut sim = Simulator::new(cfg, policy);
-
-    // 5초 실행 (directive 발동 후 3초 지연 포함)
-    sim.run_for(Duration::from_secs(5)).expect("run_for 5s");
-
-    let obs_count = sim
-        .trajectory()
-        .observation_due_count_for("kv.evict_sliding");
-    assert!(
-        obs_count >= 1,
-        "kv_evict_sliding ObservationDue가 1회 이상 기록되어야 함, actual={}",
-        obs_count
-    );
-}
-
 /// 8. Evict directive 수신 시 engine state가 갱신된다.
 ///
 /// KvEvict*는 one-shot 액션이므로 active_actions에 등록되지 않는다.
 /// 대신 last_evict_ratio가 갱신되고 directive 기록이 남는다.
 #[test]
 fn test_apply_directive_changes_engine_state() {
-    use argus_shared::SystemSignal;
+    use argus_manager::signal::SystemSignal;
 
     let cfg = load_baseline();
 
     let dir = EngineDirective {
         seq_id: 2,
-        commands: vec![EngineCommand::KvEvictH2o { keep_ratio: 0.7 }],
+        commands: vec![EngineCommand::KvCompress { budget: 0.5 }],
     };
     let dir_clone = dir.clone();
     let mut mock = MockPolicy::new();
@@ -409,7 +371,7 @@ end
 #[cfg(not(feature = "lua"))]
 #[test]
 fn test_memory_ramp_scenario_triggers_evict() {
-    use argus_shared::SystemSignal;
+    use argus_manager::signal::SystemSignal;
 
     let mut cfg = load_baseline();
     // memory_used를 경고 수준으로 높임
@@ -419,10 +381,10 @@ fn test_memory_ramp_scenario_triggers_evict() {
     let mut mock = MockPolicy::new();
     mock.directive_on_signal = Some(Box::new(|sig| {
         if let SystemSignal::MemoryPressure { level, .. } = sig {
-            if *level >= argus_shared::Level::Warning {
+            if *level >= argus_manager::signal::Level::Warning {
                 return Some(EngineDirective {
                     seq_id: 99,
-                    commands: vec![EngineCommand::KvEvictSliding { keep_ratio: 0.7 }],
+                    commands: vec![EngineCommand::KvCompress { budget: 0.5 }],
                 });
             }
         }
@@ -445,7 +407,7 @@ fn test_memory_ramp_scenario_triggers_evict() {
 /// 13. format_timeline / format_timeline_compact 출력 형식 검증.
 #[test]
 fn test_format_timeline_renders_expected_event_tags() {
-    use argus_shared::SystemSignal;
+    use argus_manager::signal::SystemSignal;
 
     let mut cfg = load_baseline();
     cfg.initial_state.device_memory_used_mb = 7500;
@@ -453,11 +415,11 @@ fn test_format_timeline_renders_expected_event_tags() {
     let mut mock = MockPolicy::new();
     mock.directive_on_signal = Some(Box::new(|sig| {
         if let SystemSignal::MemoryPressure { level, .. } = sig
-            && *level >= argus_shared::Level::Warning
+            && *level >= argus_manager::signal::Level::Warning
         {
             return Some(EngineDirective {
                 seq_id: 7,
-                commands: vec![EngineCommand::KvEvictSliding { keep_ratio: 0.5 }],
+                commands: vec![EngineCommand::KvCompress { budget: 0.5 }],
             });
         }
         None

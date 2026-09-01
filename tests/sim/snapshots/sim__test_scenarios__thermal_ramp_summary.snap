@@ -1,5 +1,5 @@
 ---
-source: manager/tests/sim/test_scenarios.rs
+source: tests/sim/test_scenarios.rs
 expression: summary
 ---
 duration_s: 30
@@ -9,18 +9,17 @@ signal_count_by_kind:
   energy_constraint: 15
   memory_pressure: 60
   thermal_alert: 30
-directive_count: 49
+directive_count: 2
 directive_kinds:
-  RequestQcf: 24
-  SwitchHw: 1
-  Throttle: 25
+  RestoreDefaults: 1
+  Suspend: 2
 first_directive_at_s: 1
 state_final:
-  kv_cache_bytes_mib: 3.32
+  kv_cache_bytes_mib: 62.43
   device_memory_used_mb: 3500
   engine_cpu_pct: 30
   engine_gpu_pct: 96
   cpu_freq_ratio: 1
   gpu_freq_ratio: 1
   thermal_c: 68
-  throughput_tps: 0.2
+  throughput_tps: 16.65

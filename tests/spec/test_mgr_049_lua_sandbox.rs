@@ -15,7 +15,7 @@ mod sandbox_tests {
     use argus_manager::config::AdaptationConfig;
     use argus_manager::lua_policy::LuaPolicy;
     use argus_manager::pipeline::{PolicyStrategy, ReloadablePolicy};
-    use argus_shared::{Level, SystemSignal};
+    use argus_manager::signal::{Level, SystemSignal};
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -31,7 +31,6 @@ mod sandbox_tests {
         let p = LuaPolicy::with_system_clock(
             f.path().to_str().unwrap(),
             AdaptationConfig {
-                qcf_penalty_weight: 0.0,
                 ..AdaptationConfig::default()
             },
         )
@@ -181,7 +180,6 @@ function decide(ctx) return {} end
         let result = LuaPolicy::with_system_clock(
             large_tmp.path().to_str().unwrap(),
             AdaptationConfig {
-                qcf_penalty_weight: 0.0,
                 ..AdaptationConfig::default()
             },
         );
@@ -201,7 +199,6 @@ function decide(ctx) return {} end
         let mut policy = LuaPolicy::with_system_clock(
             initial.path().to_str().unwrap(),
             AdaptationConfig {
-                qcf_penalty_weight: 0.0,
                 ..AdaptationConfig::default()
             },
         )

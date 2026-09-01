@@ -2,7 +2,8 @@
 pub mod dbus;
 pub mod unix_socket;
 
-use argus_shared::{EngineDirective, SystemSignal};
+use crate::signal::SystemSignal;
+use argus_shared::EngineDirective;
 
 /// Emitter delivers SystemSignals to connected LLM engine clients.
 ///

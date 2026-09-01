@@ -4,10 +4,15 @@
 framework, written in Rust.
 
 The manager runs as a separate process from the inference engine. It monitors system
-resources (memory / CPU / GPU / temperature / power) and drives a scriptable policy
-engine that sends `EngineCommand`s to the engine — evict KV cache, switch backend,
-throttle, set the tensor-partition ratio, and so on — so inference adapts at runtime
-under memory and thermal pressure.
+resources (memory / CPU / GPU / temperature / power) and drives a scriptable policy that
+tells the engine how much KV cache to keep, so inference adapts at runtime under memory
+and thermal pressure.
+
+The manager decides **when** relief is needed and **how much**; the engine decides
+**which** of its KV cache techniques delivers it. That is why the contract carries a
+budget rather than a technique name: adding or removing a technique in the engine does
+not change the protocol, and an existing runtime can be integrated by implementing three
+messages.
 
 This repository is the **manager**. It is one of three Argus repositories:
 
@@ -21,12 +26,13 @@ This repository is the **manager**. It is one of three Argus repositories:
 graph LR
     Manager["Manager<br/>(monitor + policy)"]
     Engine["Engine<br/>(LLM inference)"]
-    Manager -- "EngineCommand (Evict, SwitchHw, Throttle, ...)" --> Engine
-    Engine -- "EngineMessage (Capability, Heartbeat, ...)" --> Manager
+    Manager -- "Directive (kv.compress { budget }, restore_defaults, suspend, resume)" --> Engine
+    Engine -- "Heartbeat (kv bytes, TBT, phase) / Response (per-command result)" --> Manager
 ```
 
 - **Transport:** Unix Domain Socket / TCP / D-Bus, serde JSON.
-- **Policy:** a PI controller plus a scriptable policy engine (Lua via `mlua`).
+- **Policy:** a Lua script (`mlua`). The manager normalizes signals and applies
+  enter/exit hysteresis; the script turns that into a KV budget.
 
 ## Features
 
@@ -34,7 +40,6 @@ graph LR
 |---------|---------|-------------|
 | `dbus` | ✅ | D-Bus IPC transport (via `zbus`) |
 | `lua` | ✅ | Lua-scripted policy engine (via `mlua`, vendored Lua 5.4) |
-| `hierarchical` | | Hierarchical policy composition |
 
 ## Build & run
 
@@ -42,8 +47,10 @@ graph LR
 cargo build --release
 cargo test --workspace
 
-# Run the manager service (default transport: D-Bus; also accepts unix:/tcp:)
-./target/release/argus-manager --transport unix:/tmp/argus_manager.sock
+# Run the manager service. The transport must be bidirectional — every decision
+# needs the engine's heartbeat — so unix: or tcp:, not the emit-only dbus arm.
+./target/release/argus-manager --policy-script scripts/policy_default.lua \
+    --transport unix:/tmp/argus_manager.sock
 
 # Mock peers for integration testing without a real counterpart:
 ./target/release/mock_manager   # stands in for the manager (run when testing an engine)

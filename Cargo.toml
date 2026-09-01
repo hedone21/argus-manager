@@ -32,7 +32,6 @@ validator = { version = "0.20", features = ["derive"] }
 [features]
 dbus = ["zbus"]
 lua = ["mlua"]
-hierarchical = []
 default = ["dbus", "lua"]
 
 [dev-dependencies]

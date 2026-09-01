@@ -1,5 +1,5 @@
 ---
-source: manager/tests/sim/test_scenarios.rs
+source: tests/sim/test_scenarios.rs
 expression: summary
 ---
 duration_s: 20
@@ -9,10 +9,9 @@ signal_count_by_kind:
   energy_constraint: 10
   memory_pressure: 40
   thermal_alert: 20
-directive_count: 32
+directive_count: 1
 directive_kinds:
-  KvEvictSliding: 16
-  RequestQcf: 16
+  KvCompress: 1
 first_directive_at_s: 0.5
 state_final:
   kv_cache_bytes_mib: 41.49

@@ -1,5 +1,5 @@
 use crate::emitter::Emitter;
-use argus_shared::SystemSignal;
+use crate::signal::SystemSignal;
 
 const MANAGER_PATH: &str = "/org/llm/Manager1";
 const MANAGER_IFACE: &str = "org.llm.Manager1";
@@ -128,41 +128,41 @@ impl Emitter for DbusEmitter {
     }
 }
 
-fn level_to_str(level: argus_shared::Level) -> &'static str {
+fn level_to_str(level: crate::signal::Level) -> &'static str {
     match level {
-        argus_shared::Level::Normal => "normal",
-        argus_shared::Level::Warning => "warning",
-        argus_shared::Level::Critical => "critical",
-        argus_shared::Level::Emergency => "emergency",
+        crate::signal::Level::Normal => "normal",
+        crate::signal::Level::Warning => "warning",
+        crate::signal::Level::Critical => "critical",
+        crate::signal::Level::Emergency => "emergency",
     }
 }
 
-fn backend_to_str(b: argus_shared::RecommendedBackend) -> &'static str {
+fn backend_to_str(b: crate::signal::RecommendedBackend) -> &'static str {
     match b {
-        argus_shared::RecommendedBackend::Cpu => "cpu",
-        argus_shared::RecommendedBackend::Gpu => "gpu",
-        argus_shared::RecommendedBackend::Any => "any",
+        crate::signal::RecommendedBackend::Cpu => "cpu",
+        crate::signal::RecommendedBackend::Gpu => "gpu",
+        crate::signal::RecommendedBackend::Any => "any",
     }
 }
 
-fn compute_reason_to_str(r: argus_shared::ComputeReason) -> &'static str {
+fn compute_reason_to_str(r: crate::signal::ComputeReason) -> &'static str {
     match r {
-        argus_shared::ComputeReason::CpuBottleneck => "cpu_bottleneck",
-        argus_shared::ComputeReason::GpuBottleneck => "gpu_bottleneck",
-        argus_shared::ComputeReason::CpuAvailable => "cpu_available",
-        argus_shared::ComputeReason::GpuAvailable => "gpu_available",
-        argus_shared::ComputeReason::BothLoaded => "both_loaded",
-        argus_shared::ComputeReason::Balanced => "balanced",
+        crate::signal::ComputeReason::CpuBottleneck => "cpu_bottleneck",
+        crate::signal::ComputeReason::GpuBottleneck => "gpu_bottleneck",
+        crate::signal::ComputeReason::CpuAvailable => "cpu_available",
+        crate::signal::ComputeReason::GpuAvailable => "gpu_available",
+        crate::signal::ComputeReason::BothLoaded => "both_loaded",
+        crate::signal::ComputeReason::Balanced => "balanced",
     }
 }
 
-fn energy_reason_to_str(r: argus_shared::EnergyReason) -> &'static str {
+fn energy_reason_to_str(r: crate::signal::EnergyReason) -> &'static str {
     match r {
-        argus_shared::EnergyReason::BatteryLow => "battery_low",
-        argus_shared::EnergyReason::BatteryCritical => "battery_critical",
-        argus_shared::EnergyReason::PowerLimit => "power_limit",
-        argus_shared::EnergyReason::ThermalPower => "thermal_power",
-        argus_shared::EnergyReason::Charging => "charging",
-        argus_shared::EnergyReason::None => "none",
+        crate::signal::EnergyReason::BatteryLow => "battery_low",
+        crate::signal::EnergyReason::BatteryCritical => "battery_critical",
+        crate::signal::EnergyReason::PowerLimit => "power_limit",
+        crate::signal::EnergyReason::ThermalPower => "thermal_power",
+        crate::signal::EnergyReason::Charging => "charging",
+        crate::signal::EnergyReason::None => "none",
     }
 }

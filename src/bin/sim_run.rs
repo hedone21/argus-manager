@@ -62,11 +62,6 @@ fn main() -> anyhow::Result<()> {
 
     sim.run_for(std::time::Duration::from_secs_f64(args.duration))?;
 
-    // Relief Table: initial vs learned
-    let initial = argus_manager::pipeline::get_initial_relief_snapshot(sim.policy.as_mut());
-    let current = argus_manager::pipeline::get_relief_snapshot(sim.policy.as_mut());
-    let _ = (initial, current);
-
     let traj = sim.trajectory();
 
     if args.verbose {

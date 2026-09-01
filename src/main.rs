@@ -11,17 +11,13 @@ use argus_manager::monitor::gpu_provider::build_provider;
 use argus_manager::monitor::memory::MemoryMonitor;
 use argus_manager::monitor::thermal::ThermalMonitor;
 use argus_manager::pipeline::{DirectiveDeduplicator, PolicyStrategy};
-use argus_shared::{EngineMessage, SystemSignal};
+use argus_manager::signal::SystemSignal;
+use argus_shared::EngineMessage;
 use clap::Parser;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
-
-#[cfg(feature = "hierarchical")]
-use argus_manager::config::PolicyConfig;
-#[cfg(feature = "hierarchical")]
-use argus_manager::pipeline::HierarchicalPolicy;
 
 /// Transport 핸들. unix socket / tcp는 양방향, dbus는 emit-only.
 enum TransportHandle {
@@ -51,13 +47,22 @@ impl TransportHandle {
     }
 
     /// Engine으로부터 메시지를 non-blocking으로 수신한다.
-    /// Unix / TCP transport일 때만 실제 수신 시도. dbus는 항상 None.
     fn try_recv_engine_message(&mut self) -> Option<EngineMessage> {
         match self {
             Self::Unix(ch) => ch.try_recv().ok().flatten(),
             Self::Tcp(ch) => ch.try_recv().ok().flatten(),
             Self::EmitterOnly(_) => None,
         }
+    }
+
+    /// Whether this transport can carry engine messages back.
+    ///
+    /// An emitter-only transport cannot, and the policy is heartbeat-driven: a KV budget
+    /// is a fraction of `kv_cache_budget_bytes`, which only the engine knows. On such a
+    /// transport the manager would run forever, log a healthy monitor loop, and never
+    /// emit a directive — indistinguishable from an idle system. Startup refuses instead.
+    fn is_bidirectional(&self) -> bool {
+        !matches!(self, Self::EmitterOnly(_))
     }
 }
 
@@ -85,8 +90,10 @@ struct Args {
     #[arg(short, long, default_value = "/etc/llm-manager/config.toml")]
     config: std::path::PathBuf,
 
-    /// Transport: "dbus" (Linux System Bus), "unix:<socket_path>", or "tcp:<host:port>".
-    #[arg(short, long, default_value = "dbus")]
+    /// Transport: "unix:<socket_path>" or "tcp:<host:port>".
+    ///
+    /// "dbus" is emit-only and is refused at startup — see `TransportHandle::is_bidirectional`.
+    #[arg(short, long, default_value = "unix:/tmp/argus_manager.sock")]
     transport: String,
 
     /// Timeout in seconds to wait for LLM client (unix socket only).
@@ -141,6 +148,14 @@ fn main() -> anyhow::Result<()> {
     // Create transport (unix: 양방향, dbus: 단방향)
     let mut transport = create_transport(&args, &shutdown)?;
     log::info!("Transport: {}", transport.name());
+    if !transport.is_bidirectional() {
+        anyhow::bail!(
+            "transport '{}' cannot receive engine messages, and every policy decision \
+             needs the heartbeat (a KV budget is a fraction of kv_cache_budget_bytes, \
+             which only the engine reports). Use --transport unix:<path> or tcp:<addr>.",
+            transport.name()
+        );
+    }
 
     // GPU telemetry provider — ComputeMonitor와 LuaPolicy가 공유한다.
     let gpu_provider: SharedGpuProvider = {
@@ -221,66 +236,26 @@ fn main() -> anyhow::Result<()> {
         while let Some(msg) = transport.try_recv_engine_message() {
             match &msg {
                 EngineMessage::Heartbeat(status) => {
-                    policy.update_engine_state(&msg);
                     log::debug!(
-                        "Engine heartbeat: kv={:.2} device={}",
-                        status.kv_cache_utilization,
-                        status.active_device
+                        "Engine heartbeat: kv={}/{}B tokens={} tbt={:.1}ms phase={:?}",
+                        status.kv_cache_bytes,
+                        status.kv_cache_budget_bytes,
+                        status.kv_cache_tokens,
+                        status.tbt_ms,
+                        status.phase,
                     );
                 }
                 EngineMessage::Response(resp) => {
-                    log::info!(
+                    log::debug!(
                         "Engine response seq={}: {} results",
                         resp.seq_id,
                         resp.results.len()
                     );
                 }
-                EngineMessage::Capability(cap) => {
-                    log::info!(
-                        "Engine capability: devices={:?} available_actions={:?}",
-                        cap.available_devices,
-                        cap.available_actions
-                    );
-                    // Capability 를 policy 에 전파하여 `available_actions` 필터가
-                    // 엔진이 지원하지 않는 액션(예: F16 KV 에서 kv_quant_dynamic) 을
-                    // 선택하지 않도록 한다.
-                    policy.update_engine_state(&msg);
-                }
-                EngineMessage::QcfEstimate(qcf) => {
-                    log::info!("Engine QCF estimate: {} actions", qcf.estimates.len());
-                    if let Some(directive) = policy.complete_qcf_selection(qcf) {
-                        log::info!(
-                            "QCF-based directive seq={}: {} commands",
-                            directive.seq_id,
-                            directive.commands.len()
-                        );
-                        if let Err(e) = transport.emitter().emit_directive(&directive) {
-                            log::error!("Emit QCF directive failed: {}", e);
-                        }
-                    }
-                }
-                EngineMessage::WeightSwapReport(report) => {
-                    // Phase 3 Stage B will route this to the policy / LinUCB.
-                    log::info!(
-                        "Engine WeightSwapReport: {} layers swapped, freed={}B, qcf={:.3}",
-                        report.layers_swapped.len(),
-                        report.freed_bytes,
-                        report.qcf_swap_actual,
-                    );
-                }
             }
-        }
-
-        // QCF timeout check (SEQ-098) — 매 tick(50ms)마다 체크
-        if let Some(directive) = policy.check_qcf_timeout() {
-            log::info!(
-                "QCF timeout fallback directive seq={}: {} commands",
-                directive.seq_id,
-                directive.commands.len()
-            );
-            if let Err(e) = transport.emitter().emit_directive(&directive) {
-                log::error!("Emit QCF timeout directive failed: {}", e);
-            }
+            // The policy logs Rejected and Partial itself — those are the only signal it
+            // gets about what the engine can actually do.
+            policy.update_engine_state(&msg);
         }
 
         match rx.recv_timeout(Duration::from_millis(50)) {
@@ -337,34 +312,13 @@ fn create_policy(
     if let Some(ref script_path) = args.policy_script {
         return create_lua_policy(script_path, config, gpu_provider);
     }
-    let _ = gpu_provider; // hierarchical policy는 현재 provider 미사용
-
-    // hierarchical feature 없이 script도 없으면 에러
-    #[cfg(not(feature = "hierarchical"))]
+    let _ = (gpu_provider, config);
+    // The Lua script IS the policy — there is no compiled-in alternative to fall back to.
     {
-        let _ = config;
-        anyhow::bail!(
-            "--policy-script is required (built without 'hierarchical' feature; \
-             compile with: cargo build --features hierarchical)"
-        );
+        anyhow::bail!("--policy-script is required: the decision logic lives in the script");
     }
 
     // 기본: HierarchicalPolicy (hierarchical feature 활성 시)
-    #[cfg(feature = "hierarchical")]
-    {
-        let policy_cfg = load_policy_config(args, config);
-        let mut p = HierarchicalPolicy::new(&policy_cfg);
-        let storage_dir = if policy_cfg.relief_model.storage_dir.starts_with('~') {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            policy_cfg.relief_model.storage_dir.replacen('~', &home, 1)
-        } else {
-            policy_cfg.relief_model.storage_dir.clone()
-        };
-        let model_path = format!("{}/default_relief.json", storage_dir);
-        p.set_relief_model_path(model_path);
-        log::info!("HierarchicalPolicy initialized");
-        Ok(Box::new(p))
-    }
 }
 
 #[cfg(feature = "lua")]
@@ -394,46 +348,6 @@ fn create_lua_policy(
     anyhow::bail!(
         "--policy-script requires the 'lua' feature (compile with: cargo build --features lua)"
     )
-}
-
-/// `--policy-config` 인자 또는 메인 config의 `[policy]` 섹션에서 PolicyConfig를 로드한다.
-/// 둘 다 없으면 기본값을 사용한다.
-///
-/// 우선순위:
-/// 1. `--policy-config` CLI 플래그
-/// 2. 메인 config의 `[policy]` 섹션
-/// 3. 기본값 (`PolicyConfig::default()`)
-#[cfg(feature = "hierarchical")]
-fn load_policy_config(args: &Args, config: &Config) -> PolicyConfig {
-    if let Some(path) = &args.policy_config {
-        match std::fs::read_to_string(path) {
-            Ok(content) => match toml::from_str::<PolicyConfig>(&content) {
-                Ok(cfg) => {
-                    log::info!("Loaded policy config from {}", path.display());
-                    return cfg;
-                }
-                Err(e) => {
-                    log::error!(
-                        "Failed to parse policy config {}: {} — using defaults",
-                        path.display(),
-                        e
-                    );
-                }
-            },
-            Err(e) => {
-                log::error!(
-                    "Failed to read policy config {}: {} — using defaults",
-                    path.display(),
-                    e
-                );
-            }
-        }
-    }
-    if let Some(ref policy) = config.policy {
-        log::info!("Using policy config from main config file");
-        return policy.clone();
-    }
-    PolicyConfig::default()
 }
 
 fn create_transport(args: &Args, shutdown: &Arc<AtomicBool>) -> anyhow::Result<TransportHandle> {
