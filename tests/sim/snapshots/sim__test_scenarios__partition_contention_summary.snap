@@ -1,5 +1,5 @@
 ---
-source: manager/tests/sim/test_scenarios.rs
+source: tests/sim/test_scenarios.rs
 expression: summary
 ---
 duration_s: 30
@@ -9,10 +9,9 @@ signal_count_by_kind:
   energy_constraint: 15
   memory_pressure: 60
   thermal_alert: 30
-directive_count: 1
-directive_kinds:
-  SetPartitionRatio: 1
-first_directive_at_s: 6.5
+directive_count: 0
+directive_kinds: {}
+first_directive_at_s: ~
 state_final:
   kv_cache_bytes_mib: 44.98
   device_memory_used_mb: 3500

@@ -88,10 +88,14 @@ impl EngineStateSnapshot {
 #[derive(Debug, Clone, Serialize)]
 pub struct EngineMessageDump {
     pub kind: String,
-    pub actual_throughput: Option<f32>,
-    pub memory_level: Option<String>,
-    pub compute_level: Option<String>,
+    /// Time between tokens, **ms/token** — the heartbeat's own unit. This was
+    /// `actual_throughput` in tok/s; the two move in opposite directions, so a reader
+    /// comparing old and new trajectory dumps must not treat them as the same column.
+    pub tbt_ms: Option<f32>,
+    pub kv_cache_bytes: Option<u64>,
+    pub kv_cache_budget_bytes: Option<u64>,
     pub kv_cache_tokens: Option<usize>,
+    pub phase: Option<String>,
 }
 
 impl EngineMessageDump {
@@ -99,17 +103,19 @@ impl EngineMessageDump {
         match msg {
             argus_shared::EngineMessage::Heartbeat(status) => Self {
                 kind: "heartbeat".to_string(),
-                actual_throughput: Some(status.actual_throughput),
-                memory_level: Some(format!("{:?}", status.memory_level)),
-                compute_level: Some(format!("{:?}", status.compute_level)),
+                tbt_ms: Some(status.tbt_ms),
+                kv_cache_bytes: Some(status.kv_cache_bytes),
+                kv_cache_budget_bytes: Some(status.kv_cache_budget_bytes),
                 kv_cache_tokens: Some(status.kv_cache_tokens),
+                phase: Some(format!("{:?}", status.phase)),
             },
             _ => Self {
                 kind: "other".to_string(),
-                actual_throughput: None,
-                memory_level: None,
-                compute_level: None,
+                tbt_ms: None,
+                kv_cache_bytes: None,
+                kv_cache_budget_bytes: None,
                 kv_cache_tokens: None,
+                phase: None,
             },
         }
     }
@@ -124,9 +130,9 @@ pub struct SignalDump {
 }
 
 impl SignalDump {
-    pub fn from_signal(sig: &argus_shared::SystemSignal) -> Self {
+    pub fn from_signal(sig: &crate::signal::SystemSignal) -> Self {
         match sig {
-            argus_shared::SystemSignal::MemoryPressure {
+            crate::signal::SystemSignal::MemoryPressure {
                 level,
                 available_bytes,
                 total_bytes,
@@ -140,7 +146,7 @@ impl SignalDump {
                     "reclaim_target_bytes": reclaim_target_bytes,
                 }),
             },
-            argus_shared::SystemSignal::ComputeGuidance {
+            crate::signal::SystemSignal::ComputeGuidance {
                 level,
                 cpu_usage_pct,
                 gpu_usage_pct,
@@ -153,7 +159,7 @@ impl SignalDump {
                     "gpu_usage_pct": gpu_usage_pct,
                 }),
             },
-            argus_shared::SystemSignal::ThermalAlert {
+            crate::signal::SystemSignal::ThermalAlert {
                 level,
                 temperature_mc,
                 throttling_active,
@@ -166,7 +172,7 @@ impl SignalDump {
                     "throttling_active": throttling_active,
                 }),
             },
-            argus_shared::SystemSignal::EnergyConstraint {
+            crate::signal::SystemSignal::EnergyConstraint {
                 level,
                 power_budget_mw,
                 ..
@@ -297,7 +303,7 @@ impl Trajectory {
         });
     }
 
-    pub fn record_signal(&mut self, at: Duration, sig: &argus_shared::SystemSignal) {
+    pub fn record_signal(&mut self, at: Duration, sig: &crate::signal::SystemSignal) {
         self.entries.push(TrajectoryEntry::Signal {
             at_s: at.as_secs_f64(),
             signal: SignalDump::from_signal(sig),
@@ -307,7 +313,7 @@ impl Trajectory {
     pub fn record_directive(
         &mut self,
         at: Duration,
-        trigger: &argus_shared::SystemSignal,
+        trigger: &crate::signal::SystemSignal,
         dir: &argus_shared::EngineDirective,
     ) {
         self.entries.push(TrajectoryEntry::Directive {
@@ -337,23 +343,6 @@ impl Trajectory {
         self.entries.push(TrajectoryEntry::Custom {
             at_s: at.as_secs_f64(),
             name: name.to_string(),
-        });
-    }
-
-    #[cfg(feature = "lua")]
-    pub fn record_relief_update(
-        &mut self,
-        at: Duration,
-        ev: &crate::policy::common::state::ReliefUpdateEvent,
-    ) {
-        self.entries.push(TrajectoryEntry::ReliefUpdate {
-            at_s: at.as_secs_f64(),
-            action: ev.action.clone(),
-            before: ev.before,
-            after: ev.after,
-            observed: ev.observed,
-            observation_count: ev.observation_count,
-            age_s: ev.age_s,
         });
     }
 
@@ -922,12 +911,13 @@ impl Trajectory {
                     }
                     writeln!(
                         out,
-                        "t={:7.2}s  [HB]     tps={:6.2}  mem={}  compute={}  kv_tok={}",
+                        "t={:7.2}s  [HB]     tbt={:6.2}ms  kv={}/{}B  kv_tok={}  phase={}",
                         at_s,
-                        message.actual_throughput.unwrap_or(0.0),
-                        message.memory_level.as_deref().unwrap_or("?"),
-                        message.compute_level.as_deref().unwrap_or("?"),
+                        message.tbt_ms.unwrap_or(0.0),
+                        message.kv_cache_bytes.unwrap_or(0),
+                        message.kv_cache_budget_bytes.unwrap_or(0),
                         message.kv_cache_tokens.unwrap_or(0),
+                        message.phase.as_deref().unwrap_or("?"),
                     )
                     .ok();
                 }

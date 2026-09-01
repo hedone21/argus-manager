@@ -1,6 +1,6 @@
 use super::Monitor;
 use crate::config::ExternalMonitorConfig;
-use argus_shared::SystemSignal;
+use crate::signal::SystemSignal;
 use std::io::{BufRead, BufReader};
 use std::net::TcpListener;
 use std::os::unix::net::UnixListener;
@@ -201,7 +201,7 @@ impl Monitor for ExternalMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use argus_shared::Level;
+    use crate::signal::Level;
     use std::io::Write;
     use std::os::unix::net::UnixStream;
 

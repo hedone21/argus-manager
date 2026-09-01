@@ -1,7 +1,7 @@
 use super::Monitor;
 use crate::config::EnergyMonitorConfig;
 use crate::evaluator::{Direction, ThresholdEvaluator, Thresholds};
-use argus_shared::{EnergyReason, Level, SystemSignal};
+use crate::signal::{EnergyReason, Level, SystemSignal};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

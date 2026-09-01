@@ -11,7 +11,7 @@ pub use compute::{compute_level_from_pcts, compute_recommendation};
 pub use memory::memory_level_from_available_pct;
 pub use thermal::{thermal_level_from_temp_c, throttle_ratio_from_level};
 
-use argus_shared::SystemSignal;
+use crate::signal::SystemSignal;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;

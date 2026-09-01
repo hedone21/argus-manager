@@ -5,5 +5,5 @@
 -- EWMA relief 학습 경로 검증용 결정론적 스크립트.
 
 function decide(ctx)
-  return {{ type = "kv.evict_sliding", keep_ratio = 0.7 }}
+  return {{ type = "kv.compress", budget = 0.7 }}
 end

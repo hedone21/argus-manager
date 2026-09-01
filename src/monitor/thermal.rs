@@ -1,7 +1,7 @@
 use super::Monitor;
 use crate::config::ThermalMonitorConfig;
 use crate::evaluator::{Direction, ThresholdEvaluator, Thresholds};
-use argus_shared::{Level, SystemSignal};
+use crate::signal::{Level, SystemSignal};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;

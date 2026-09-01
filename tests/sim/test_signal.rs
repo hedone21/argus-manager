@@ -22,16 +22,13 @@ use std::time::Duration;
 
 use crate::common::sim::{
     clock::{EventKind, VirtualClock},
-    config::{NoiseSpec, ScenarioConfig, load_scenario},
+    config::{ScenarioConfig, load_scenario},
     noise::NoiseRng,
     physics::step,
-    signal::{
-        derive_compute_signal_pub, derive_heartbeat, derive_memory_signal_pub,
-        derive_thermal_signal_pub,
-    },
+    signal::{derive_compute_signal_pub, derive_memory_signal_pub, derive_thermal_signal_pub},
     state::{EngineStateModel, PhysicalState},
 };
-use argus_shared::{EngineMessage, Level, RecommendedBackend, SystemSignal};
+use argus_manager::signal::{Level, RecommendedBackend, SystemSignal};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -178,43 +175,6 @@ fn test_noise_independent_streams() {
 // ─────────────────────────────────────────────────────────
 
 #[test]
-fn test_heartbeat_roundtrip_preserves_state() {
-    let cfg = load_baseline();
-    let (mut state, engine) = make_state_and_engine(&cfg);
-    state.throughput_tps = 14.5;
-
-    let msg = derive_heartbeat(&state, &engine, &cfg, &mut None);
-    if let EngineMessage::Heartbeat(status) = msg {
-        let diff = (status.actual_throughput - 14.5_f32).abs();
-        assert!(
-            diff < 0.01,
-            "noise 없을 때 throughput 보존: actual={}",
-            status.actual_throughput
-        );
-    } else {
-        panic!("Expected Heartbeat");
-    }
-}
-
-#[test]
-fn test_heartbeat_self_cpu_pct_clamped() {
-    let cfg = load_baseline();
-    let (mut state, engine) = make_state_and_engine(&cfg);
-    state.engine_cpu_pct = 150.0; // 150% → clamp to 1.0
-
-    let msg = derive_heartbeat(&state, &engine, &cfg, &mut None);
-    if let EngineMessage::Heartbeat(status) = msg {
-        assert_eq!(
-            status.self_cpu_pct, 1.0,
-            "engine_cpu_pct=150 → self_cpu_pct 클램핑 1.0, actual={}",
-            status.self_cpu_pct
-        );
-    } else {
-        panic!("Expected Heartbeat");
-    }
-}
-
-#[test]
 fn test_derive_memory_signal_maps_level_correctly() {
     let cfg = load_baseline();
     let (mut state, _) = make_state_and_engine(&cfg);
@@ -312,43 +272,6 @@ fn test_signal_polling_cadence_respects_config() {
         "memory polling cadence: expected={}, actual={}",
         expected, count
     );
-}
-
-#[test]
-fn test_noise_injects_into_heartbeat_throughput() {
-    let cfg = load_baseline();
-    let (mut state, engine) = make_state_and_engine(&cfg);
-    state.throughput_tps = 14.5;
-
-    // seed 고정 + sigma=1.0 → noise가 주입됨
-    let mut cfg_noise = cfg.clone();
-    cfg_noise.rng_seed = Some(42);
-    cfg_noise.observation.heartbeat.noise.insert(
-        "throughput_tps".to_string(),
-        NoiseSpec {
-            sigma: Some(1.0),
-            sigma_mb: None,
-            sigma_mc: None,
-            seed_key: "hb.tps".to_string(),
-        },
-    );
-
-    let mut rng = Some(NoiseRng::new(42));
-    let msg = derive_heartbeat(&state, &engine, &cfg_noise, &mut rng);
-    if let EngineMessage::Heartbeat(status) = msg {
-        // noise가 있으므로 14.5와 약간 다름 (sigma=1.0 → 3σ=3 이내)
-        let diff = (status.actual_throughput - 14.5_f32).abs();
-        assert!(
-            diff < 5.0,
-            "throughput with sigma=1.0 noise: actual={}, diff={}",
-            status.actual_throughput,
-            diff
-        );
-        // sigma=1.0 noise가 주입됐으므로 정확히 14.5와 같을 가능성은 극히 낮음
-        // (Box-Muller가 0을 반환할 확률은 0이므로)
-    } else {
-        panic!("Expected Heartbeat");
-    }
 }
 
 // ─────────────────────────────────────────────────────────

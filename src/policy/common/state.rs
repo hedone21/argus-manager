@@ -1,9 +1,5 @@
 use crate::config::TriggerConfig;
-#[cfg(feature = "hierarchical")]
-use crate::types::{PressureVector, ReliefVector};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::Path;
 
 /// 6D relief 벡터 차원 수 (gpu, cpu, memory, thermal, latency, main_app_qos).
 pub const RELIEF_DIMS: usize = 6;
@@ -16,47 +12,6 @@ pub struct Pressure6D {
     pub thermal: f32,
     pub latency: f32,
     pub main_app: f32,
-}
-
-#[cfg(feature = "hierarchical")]
-impl From<PressureVector> for Pressure6D {
-    fn from(pv: PressureVector) -> Self {
-        Pressure6D {
-            gpu: 0.0,
-            cpu: pv.compute,
-            memory: pv.memory,
-            thermal: pv.thermal,
-            latency: 0.0,
-            main_app: 0.0,
-        }
-    }
-}
-
-#[cfg(feature = "hierarchical")]
-impl From<ReliefVector> for Pressure6D {
-    fn from(rv: ReliefVector) -> Self {
-        Pressure6D {
-            gpu: 0.0,
-            cpu: rv.compute,
-            memory: rv.memory,
-            thermal: rv.thermal,
-            latency: rv.latency,
-            main_app: 0.0,
-        }
-    }
-}
-
-impl From<[f32; 6]> for Pressure6D {
-    fn from(arr: [f32; 6]) -> Self {
-        Pressure6D {
-            gpu: arr[0],
-            cpu: arr[1],
-            memory: arr[2],
-            thermal: arr[3],
-            latency: arr[4],
-            main_app: arr[5],
-        }
-    }
 }
 
 impl From<Pressure6D> for [f32; 6] {
@@ -182,11 +137,16 @@ impl TriggerEngine {
         }
     }
 
-    pub fn update_tbt_from_throughput(&mut self, throughput: f32) {
-        if throughput <= 0.0 {
+    /// Feed the heartbeat's time-between-tokens.
+    ///
+    /// This took tokens per second and inverted it while the heartbeat reported
+    /// throughput. The heartbeat reports ms/token now, so the reciprocal — and the
+    /// division-by-zero it needed guarding for — is gone.
+    pub fn update_tbt_ms(&mut self, tbt_ms: f64) {
+        // NaN and non-positive alike: neither is an observation.
+        if !tbt_ms.is_finite() || tbt_ms <= 0.0 {
             return;
         }
-        let tbt_ms = 1000.0 / throughput as f64;
         self.tbt.observe(tbt_ms);
 
         if let Some(ratio) = self.tbt.degradation_ratio() {
@@ -227,129 +187,4 @@ impl TriggerEngine {
     pub fn tbt_degradation_ratio(&self) -> Option<f64> {
         self.tbt.degradation_ratio()
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReliefEntry {
-    pub relief: [f32; RELIEF_DIMS],
-    pub observation_count: u32,
-}
-
-pub struct EwmaReliefTable {
-    pub entries: HashMap<String, ReliefEntry>,
-    pub alpha: f32,
-    pub defaults: HashMap<String, Vec<f32>>,
-}
-
-impl EwmaReliefTable {
-    pub fn new(alpha: f32, defaults: HashMap<String, Vec<f32>>) -> Self {
-        Self {
-            entries: HashMap::new(),
-            alpha,
-            defaults,
-        }
-    }
-
-    pub fn predict(&self, action: &str) -> [f32; RELIEF_DIMS] {
-        if let Some(entry) = self.entries.get(action) {
-            return entry.relief;
-        }
-        if let Some(default) = self.defaults.get(action) {
-            let mut relief = [0.0f32; RELIEF_DIMS];
-            for (i, v) in default.iter().enumerate().take(RELIEF_DIMS) {
-                relief[i] = *v;
-            }
-            return relief;
-        }
-        [0.0; RELIEF_DIMS]
-    }
-
-    pub fn observe(&mut self, action: &str, observed: &[f32; RELIEF_DIMS]) {
-        let default = self
-            .defaults
-            .get(action)
-            .map(|v| {
-                let mut r = [0.0f32; RELIEF_DIMS];
-                for (i, &val) in v.iter().enumerate().take(RELIEF_DIMS) {
-                    r[i] = val;
-                }
-                r
-            })
-            .unwrap_or([0.0f32; RELIEF_DIMS]);
-
-        let entry = self
-            .entries
-            .entry(action.to_string())
-            .or_insert_with(|| ReliefEntry {
-                relief: default,
-                observation_count: 0,
-            });
-
-        let a = self.alpha;
-        for (i, &obs_val) in observed.iter().enumerate() {
-            entry.relief[i] = a * entry.relief[i] + (1.0 - a) * obs_val;
-        }
-        entry.observation_count += 1;
-    }
-
-    pub fn observation_count(&self, action: &str) -> u32 {
-        self.entries.get(action).map_or(0, |e| e.observation_count)
-    }
-
-    pub fn snapshot(&self) -> HashMap<String, [f32; RELIEF_DIMS]> {
-        self.entries
-            .iter()
-            .map(|(k, v)| (k.clone(), v.relief))
-            .collect()
-    }
-
-    pub fn initial_snapshot(&self) -> HashMap<String, [f32; RELIEF_DIMS]> {
-        self.defaults
-            .iter()
-            .map(|(k, v)| {
-                let mut arr = [0.0f32; RELIEF_DIMS];
-                for (i, &val) in v.iter().enumerate().take(RELIEF_DIMS) {
-                    arr[i] = val;
-                }
-                (k.clone(), arr)
-            })
-            .collect()
-    }
-
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        let json = serde_json::to_string_pretty(&self.entries).map_err(std::io::Error::other)?;
-        std::fs::write(path, json)
-    }
-
-    pub fn load(
-        path: &Path,
-        alpha: f32,
-        defaults: HashMap<String, Vec<f32>>,
-    ) -> std::io::Result<Self> {
-        let json = std::fs::read_to_string(path)?;
-        let entries: HashMap<String, ReliefEntry> =
-            serde_json::from_str(&json).map_err(std::io::Error::other)?;
-        Ok(Self {
-            entries,
-            alpha,
-            defaults,
-        })
-    }
-}
-
-/// Relief 테이블 업데이트 이벤트 (관측성 훅).
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ReliefUpdateEvent {
-    /// observe() 대상 action 이름.
-    pub action: String,
-    /// observe() 호출 전 relief 벡터.
-    pub before: [f32; RELIEF_DIMS],
-    /// observe() 호출 후 relief 벡터 (EWMA 적용 결과).
-    pub after: [f32; RELIEF_DIMS],
-    /// 이번에 관측된 델타 (before_pressure - after_pressure).
-    pub observed: [f32; RELIEF_DIMS],
-    /// 업데이트 후 total observation count.
-    pub observation_count: u32,
-    /// ObservationContext가 기록된 이후 경과 시간 (초).
-    pub age_s: f64,
 }

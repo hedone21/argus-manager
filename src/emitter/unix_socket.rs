@@ -1,5 +1,6 @@
 use crate::emitter::Emitter;
-use argus_shared::{EngineDirective, ManagerMessage, SystemSignal};
+use crate::signal::SystemSignal;
+use argus_shared::{EngineDirective, ManagerMessage};
 use std::io::Write;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -173,7 +174,7 @@ impl Drop for UnixSocketEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use argus_shared::Level;
+    use crate::signal::Level;
     use std::io::Read;
 
     #[test]
@@ -248,7 +249,7 @@ mod tests {
         // Emit a directive
         let directive = EngineDirective {
             seq_id: 42,
-            commands: vec![EngineCommand::KvEvictSliding { keep_ratio: 0.5 }],
+            commands: vec![EngineCommand::KvCompress { budget: 0.5 }],
         };
         emitter.emit_directive(&directive).unwrap();
 
@@ -267,7 +268,7 @@ mod tests {
                 assert_eq!(d.commands.len(), 1);
                 assert!(matches!(
                     d.commands[0],
-                    EngineCommand::KvEvictSliding { .. }
+                    EngineCommand::KvCompress { budget: 0.5 }
                 ));
             }
         }

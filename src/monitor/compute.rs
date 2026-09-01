@@ -2,7 +2,7 @@ use super::Monitor;
 use super::gpu_provider::{self, GpuTelemetryProvider};
 use crate::config::{ComputeMonitorConfig, GpuBackend};
 use crate::evaluator::{Direction, ThresholdEvaluator, Thresholds};
-use argus_shared::{ComputeReason, Level, RecommendedBackend, SystemSignal};
+use crate::signal::{ComputeReason, Level, RecommendedBackend, SystemSignal};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, mpsc};

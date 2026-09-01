@@ -13,8 +13,6 @@ pub struct Config {
     /// Online adaptation settings for LuaPolicy.
     #[serde(default)]
     pub adaptation: AdaptationConfig,
-    #[cfg(feature = "hierarchical")]
-    pub policy: Option<PolicyConfig>,
 }
 
 impl Config {
@@ -207,14 +205,6 @@ impl Default for ExternalMonitorConfig {
 /// Configuration for LuaPolicy online adaptation (trigger, EWMA, relief defaults).
 #[derive(Debug, Clone, Deserialize)]
 pub struct AdaptationConfig {
-    /// EWMA smoothing factor (default: 0.875 = 7/8, Jacobson TCP RTT).
-    #[serde(default = "default_ewma_alpha")]
-    pub ewma_alpha: f32,
-
-    /// Path to save/load the learned relief table (empty = disabled).
-    #[serde(default)]
-    pub relief_table_path: String,
-
     /// Safe temperature baseline for thermal normalization (Celsius).
     #[serde(default = "default_temp_safe")]
     pub temp_safe_c: f32,
@@ -227,30 +217,10 @@ pub struct AdaptationConfig {
     #[serde(default)]
     pub trigger: TriggerConfig,
 
-    /// Per-action default relief values [gpu, cpu, memory, thermal, latency, main_app_qos].
-    #[serde(default)]
-    pub default_relief: std::collections::HashMap<String, Vec<f32>>,
-
     /// DirectiveDeduplicator cooldown (seconds).
     /// cooldown이 경과하면 동일한 directive도 재방출하여 relief observation이 쌓이도록 한다.
     #[serde(default = "default_dedup_cooldown_secs")]
     pub dedup_cooldown_secs: f64,
-
-    /// Relief table 자동 저장 인터벌 (초). 0이면 비활성화. 기본 300.0s.
-    #[serde(default = "default_persist_interval_secs")]
-    pub persist_interval_secs: f64,
-
-    /// LinUCB UCB 탐색 가중치 (0 = 비활성, 기본 0.5).
-    #[serde(default = "default_linucb_alpha")]
-    pub linucb_alpha: f32,
-
-    /// QCF quality penalty weight in DPP score (V_Q). 0 = 비활성. 기본 0.5.
-    #[serde(default = "default_qcf_penalty_weight")]
-    pub qcf_penalty_weight: f32,
-
-    /// QCF cache TTL (초). 초과 시 stale로 판단해 재요청. 기본 5.0.
-    #[serde(default = "default_qcf_stale_secs")]
-    pub qcf_stale_secs: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -274,17 +244,10 @@ pub struct TriggerConfig {
 impl Default for AdaptationConfig {
     fn default() -> Self {
         Self {
-            ewma_alpha: 0.875,
-            relief_table_path: String::new(),
             temp_safe_c: 35.0,
             temp_critical_c: 50.0,
             trigger: TriggerConfig::default(),
-            default_relief: std::collections::HashMap::new(),
             dedup_cooldown_secs: 60.0,
-            persist_interval_secs: 300.0,
-            linucb_alpha: 0.5,
-            qcf_penalty_weight: default_qcf_penalty_weight(),
-            qcf_stale_secs: default_qcf_stale_secs(),
         }
     }
 }
@@ -303,9 +266,6 @@ impl Default for TriggerConfig {
     }
 }
 
-fn default_ewma_alpha() -> f32 {
-    0.875
-}
 fn default_temp_safe() -> f32 {
     35.0
 }
@@ -336,161 +296,6 @@ fn default_temp_exit() -> f64 {
 fn default_dedup_cooldown_secs() -> f64 {
     60.0
 }
-fn default_persist_interval_secs() -> f64 {
-    300.0
-}
-fn default_linucb_alpha() -> f32 {
-    0.5
-}
-fn default_qcf_penalty_weight() -> f32 {
-    0.5
-}
-fn default_qcf_stale_secs() -> f64 {
-    5.0
-}
-
-#[cfg(feature = "hierarchical")]
-mod hierarchical_config {
-    use super::*;
-    use crate::pi_controller::GainZone;
-    use std::collections::HashMap;
-
-    /// 계층형 정책 설정 (PI Controller + Supervisory + Selector + Relief Model)
-    #[derive(Debug, Clone, Default, Deserialize)]
-    #[serde(default)]
-    pub struct PolicyConfig {
-        pub pi_controller: PiControllerConfig,
-        pub supervisory: SupervisoryConfig,
-        pub selector: SelectorConfig,
-        pub relief_model: ReliefModelConfig,
-        pub actions: HashMap<String, ActionConfig>,
-        pub exclusion_groups: HashMap<String, Vec<String>>,
-    }
-
-    /// PI Controller 설정
-    #[derive(Debug, Clone, Deserialize)]
-    #[serde(default)]
-    pub struct PiControllerConfig {
-        pub compute_kp: f32,
-        pub compute_ki: f32,
-        pub compute_setpoint: f32,
-        pub memory_kp: f32,
-        pub memory_ki: f32,
-        pub memory_setpoint: f32,
-        pub thermal_kp: f32,
-        pub thermal_ki: f32,
-        pub thermal_setpoint: f32,
-        pub integral_clamp: f32,
-        /// Memory 도메인의 gain scheduling 구간.
-        /// 미설정 시 고정 memory_kp를 사용한다.
-        #[serde(default)]
-        pub memory_gain_zones: Vec<GainZone>,
-    }
-
-    impl Default for PiControllerConfig {
-        fn default() -> Self {
-            Self {
-                compute_kp: 1.5,
-                compute_ki: 0.3,
-                compute_setpoint: 0.70,
-                memory_kp: 2.0,
-                memory_ki: 0.5,
-                memory_setpoint: 0.75,
-                thermal_kp: 1.0,
-                thermal_ki: 0.2,
-                thermal_setpoint: 0.80,
-                integral_clamp: 2.0,
-                memory_gain_zones: Vec::new(),
-            }
-        }
-    }
-
-    /// Supervisory 모드 전환 임계값 설정
-    #[derive(Debug, Clone, Deserialize)]
-    #[serde(default)]
-    pub struct SupervisoryConfig {
-        pub warning_threshold: f32,
-        pub critical_threshold: f32,
-        pub warning_release: f32,
-        pub critical_release: f32,
-        pub hold_time_secs: f32,
-    }
-
-    impl Default for SupervisoryConfig {
-        fn default() -> Self {
-            Self {
-                warning_threshold: 0.4,
-                critical_threshold: 0.7,
-                warning_release: 0.25,
-                critical_release: 0.50,
-                hold_time_secs: 4.0,
-            }
-        }
-    }
-
-    /// Action Selector 설정
-    #[derive(Debug, Clone, Deserialize)]
-    #[serde(default)]
-    pub struct SelectorConfig {
-        pub latency_budget: f32,
-        pub algorithm: String,
-    }
-
-    impl Default for SelectorConfig {
-        fn default() -> Self {
-            Self {
-                latency_budget: 0.5,
-                algorithm: "exhaustive".to_string(),
-            }
-        }
-    }
-
-    /// Relief Estimator 모델 설정
-    #[derive(Debug, Clone, Deserialize)]
-    #[serde(default)]
-    pub struct ReliefModelConfig {
-        pub forgetting_factor: f32,
-        pub prior_weight: u32,
-        pub storage_dir: String,
-    }
-
-    impl Default for ReliefModelConfig {
-        fn default() -> Self {
-            Self {
-                forgetting_factor: 0.995,
-                prior_weight: 5,
-                storage_dir: "~/.argus/models".to_string(),
-            }
-        }
-    }
-
-    /// 액션별 메타데이터 설정
-    #[derive(Debug, Clone, Deserialize)]
-    #[serde(default)]
-    pub struct ActionConfig {
-        pub lossy: bool,
-        pub reversible: bool,
-        #[serde(default = "default_cost")]
-        pub default_cost: f32,
-    }
-
-    impl Default for ActionConfig {
-        fn default() -> Self {
-            Self {
-                lossy: false,
-                reversible: false,
-                default_cost: default_cost(),
-            }
-        }
-    }
-
-    fn default_cost() -> f32 {
-        1.0
-    }
-}
-
-#[cfg(feature = "hierarchical")]
-pub use hierarchical_config::*;
 
 #[cfg(test)]
 mod tests {
@@ -579,108 +384,5 @@ transport = "stdin"
         );
         assert!(!config.energy.unwrap().enabled);
         assert!(config.external.unwrap().enabled);
-    }
-
-    #[cfg(feature = "hierarchical")]
-    mod hierarchical_tests {
-        use super::super::*;
-
-        #[test]
-        fn parse_policy_config() {
-            let toml_str = r#"
-[policy.pi_controller]
-compute_kp = 1.5
-compute_ki = 0.3
-
-[policy.supervisory]
-warning_threshold = 0.4
-critical_threshold = 0.7
-
-[policy.selector]
-latency_budget = 0.5
-
-[policy.actions.switch_hw]
-lossy = false
-reversible = true
-
-[policy.actions."kv.evict_sliding"]
-lossy = true
-reversible = false
-
-[policy.exclusion_groups]
-eviction = ["kv.evict_sliding", "kv.evict_h2o"]
-"#;
-            let config: Config = toml::from_str(toml_str).unwrap();
-            let policy = config.policy.unwrap();
-            assert!((policy.pi_controller.compute_kp - 1.5).abs() < f32::EPSILON);
-            assert!((policy.supervisory.warning_threshold - 0.4).abs() < f32::EPSILON);
-            let switch = policy.actions.get("switch_hw").unwrap();
-            assert!(!switch.lossy);
-            assert!(switch.reversible);
-            let kv_evict = policy.actions.get("kv.evict_sliding").unwrap();
-            assert!(kv_evict.lossy);
-            let eviction = policy.exclusion_groups.get("eviction").unwrap();
-            assert_eq!(eviction.len(), 2);
-        }
-
-        #[test]
-        fn policy_config_defaults() {
-            let policy = PolicyConfig::default();
-            assert!((policy.pi_controller.compute_kp - 1.5).abs() < f32::EPSILON);
-            assert!((policy.pi_controller.memory_kp - 2.0).abs() < f32::EPSILON);
-            assert!((policy.supervisory.warning_threshold - 0.4).abs() < f32::EPSILON);
-            assert!((policy.supervisory.hold_time_secs - 4.0).abs() < f32::EPSILON);
-            assert_eq!(policy.selector.algorithm, "exhaustive");
-            assert!((policy.relief_model.forgetting_factor - 0.995).abs() < f32::EPSILON);
-            assert_eq!(policy.relief_model.prior_weight, 5);
-        }
-
-        #[test]
-        fn config_policy_optional_none_by_default() {
-            let config = Config::default();
-            assert!(config.policy.is_none());
-        }
-
-        #[test]
-        fn action_config_default_cost_fallback_is_one() {
-            // default_cost 필드 없이 파싱 시 1.0으로 폴백되어야 한다
-            let toml_str = r#"
-[policy.actions."kv.evict_sliding"]
-lossy = true
-reversible = false
-"#;
-            let config: Config = toml::from_str(toml_str).unwrap();
-            let policy = config.policy.unwrap();
-            let action = policy.actions.get("kv.evict_sliding").unwrap();
-            assert!((action.default_cost - 1.0).abs() < f32::EPSILON);
-        }
-
-        #[test]
-        fn action_config_explicit_default_cost_loaded() {
-            // 명시적 default_cost 값이 정확히 로드되어야 한다
-            let toml_str = r#"
-[policy.actions."kv.evict_sliding"]
-lossy = true
-reversible = false
-default_cost = 0.5
-
-[policy.actions."weight.skip"]
-lossy = true
-reversible = true
-default_cost = 2.0
-"#;
-            let config: Config = toml::from_str(toml_str).unwrap();
-            let policy = config.policy.unwrap();
-            let evict = policy.actions.get("kv.evict_sliding").unwrap();
-            assert!((evict.default_cost - 0.5).abs() < f32::EPSILON);
-            let skip = policy.actions.get("weight.skip").unwrap();
-            assert!((skip.default_cost - 2.0).abs() < f32::EPSILON);
-        }
-
-        #[test]
-        fn action_config_default_impl_has_cost_one() {
-            let cfg = ActionConfig::default();
-            assert!((cfg.default_cost - 1.0).abs() < f32::EPSILON);
-        }
     }
 }

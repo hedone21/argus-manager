@@ -8,8 +8,9 @@
 #![allow(dead_code)]
 
 use crate::pipeline::PolicyStrategy;
+use crate::signal::SystemSignal;
 use crate::types::OperatingMode;
-use argus_shared::{EngineDirective, EngineMessage, SystemSignal};
+use argus_shared::{EngineDirective, EngineMessage};
 
 /// 신호 핸들러 콜백 타입.
 type SignalHandler = Box<dyn Fn(&SystemSignal) -> Option<EngineDirective> + Send>;
@@ -67,10 +68,5 @@ impl PolicyStrategy for MockPolicy {
 
     fn mode(&self) -> OperatingMode {
         OperatingMode::Normal
-    }
-
-    fn check_qcf_timeout(&mut self) -> Option<EngineDirective> {
-        self.qcf_timeout_count += 1;
-        self.pending_qcf_directive.take()
     }
 }
