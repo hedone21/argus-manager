@@ -90,7 +90,12 @@ impl ThermalMonitor {
         let base_path = std::path::Path::new(&self.thermal_base);
         let mut all_zones = Vec::new();
 
-        for i in 0..32 {
+        // Zones are numbered contiguously but run well past 32 on a phone: the Galaxy S25
+        // exposes 68, and the ones a policy wants — the skin sensor `sys-therm-0` (zone 53),
+        // the battery (zone 60) — sit after the per-core junction sensors that fill 0..31.
+        // Scanning only those made a `zone_types` filter for the skin match nothing and fall
+        // back to "all", i.e. the hottest core, which reads 98 C the moment a model loads.
+        for i in 0..256 {
             let type_path = base_path.join(format!("thermal_zone{}/type", i));
             let temp_path = base_path.join(format!("thermal_zone{}/temp", i));
 
