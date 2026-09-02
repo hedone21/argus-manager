@@ -116,15 +116,33 @@ function decide(ctx)
   end
 
   local p = normalize(ctx)
-  local a = most_stressed(p)
 
-  if relieving[a] then
-    if p[a] < EXIT[a] then
-      relieving[a] = nil
-      applied = nil
-      return { type = "restore_defaults" }
+  -- Close every window whose axis has fallen back under its own EXIT threshold, and sweep
+  -- ALL of them rather than only the one `most_stressed` names. That function answers "which
+  -- axis is furthest past its own threshold", and once every axis has headroom the answer is
+  -- an arbitrary one of them. Keying the exit check on it therefore LOSES windows: a relieved
+  -- axis that cools while some other axis happens to rank worst is never re-examined, so
+  -- `relieving` and `applied` latch for the rest of the run. One spike would pin the cache at
+  -- that budget forever -- and because the ratchet below refuses anything looser, even a later
+  -- spike wanting a LOOSER budget returns nothing. Verified against this script directly.
+  local still_relieving = false
+  for _, axis in ipairs(AXES) do
+    if relieving[axis] then
+      if p[axis] < EXIT[axis] then
+        relieving[axis] = nil
+      else
+        still_relieving = true
+      end
     end
-  elseif p[a] < ENTER[a] then
+  end
+  if applied and not still_relieving then
+    -- Every window has closed. Leaving the window is the only thing that gives the cache back.
+    applied = nil
+    return { type = "restore_defaults" }
+  end
+
+  local a = most_stressed(p)
+  if not relieving[a] and p[a] < ENTER[a] then
     -- Headroom on the worst axis means headroom everywhere: run at full accuracy.
     return nil
   end
