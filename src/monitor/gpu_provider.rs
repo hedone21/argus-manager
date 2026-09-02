@@ -20,13 +20,40 @@ use std::thread::JoinHandle;
 use crate::config::GpuBackend;
 
 /// Adreno/Mali sysfs 후보 경로 — 존재하는 첫 파일을 사용한다.
+///
+/// `/sys/class/kgsl/...` 는 KGSL 이 스스로 만드는 class 심볼릭 링크라 SoC/커널을 가리지 않는
+/// 반면, 아래 `platform/kgsl-3d0.0` 형태는 특정 디바이스 트리 이름에 묶인다. Galaxy S25
+/// (Adreno 830) 에는 class 경로만 있고 나머지 셋은 **전부 없다** — 그래서 후보 목록이
+/// 비어 있는 것과 같았고, GPU 축이 조용히 0 으로 읽혔다(2026-09-02 온디바이스 확인).
+/// `devfreq/gpu_load` 를 먼저 두는 이유: 순수 정수이고 읽어도 리셋되지 않는다.
+/// `gpu_busy_percentage` 는 `"90 %"` 처럼 단위가 붙어 나오므로 [`parse_util_pct`] 가 필요하다.
 pub(crate) const SYSFS_UTIL_CANDIDATES: &[&str] = &[
+    "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load",
+    "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
     "/sys/kernel/gpu/gpu_busy_percentage",
     "/sys/devices/platform/kgsl-3d0.0/kgsl/kgsl-3d0/gpu_busy_percentage",
     "/sys/class/misc/mali0/device/utilization",
 ];
 
-pub(crate) const SYSFS_FREQ_CANDIDATES: &[&str] = &["/sys/class/kgsl/kgsl-3d0/gpuclk"];
+/// 둘 다 Hz. `gpuclk` 는 S25 에서 존재하지만 shell 이 읽을 수 없어(권한) `devfreq/cur_freq`
+/// 가 실제로 답하는 경로다.
+pub(crate) const SYSFS_FREQ_CANDIDATES: &[&str] = &[
+    "/sys/class/kgsl/kgsl-3d0/gpuclk",
+    "/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq",
+];
+
+/// sysfs utilization 읽기값을 파싱한다 — 뒤에 붙은 단위를 허용한다.
+///
+/// KGSL 은 `gpu_busy_percentage` 를 `"90 %"` 로 쓴다. 맨 `parse::<f64>()` 는 이걸 거부하고,
+/// 그러면 축이 "GPU 텔레메트리 없음"으로 읽히는데 이는 **놀고 있는 GPU 와 구분되지 않는다**.
+/// 의미가 있는 건 맨 앞 숫자 토큰뿐이고 그 뒤는 단위다.
+fn parse_util_pct(content: &str) -> Option<f64> {
+    let head = content
+        .trim()
+        .split(|c: char| c.is_whitespace() || c == '%')
+        .find(|tok| !tok.is_empty())?;
+    head.parse::<f64>().ok()
+}
 
 /// GPU telemetry를 제공하는 추상화.
 ///
@@ -103,7 +130,7 @@ impl GpuTelemetryProvider for SysfsGpuProvider {
     fn util_pct(&mut self) -> Option<f64> {
         for path in &self.util_paths {
             if let Ok(content) = std::fs::read_to_string(path)
-                && let Ok(v) = content.trim().parse::<f64>()
+                && let Some(v) = parse_util_pct(&content)
             {
                 return Some(v.clamp(0.0, 100.0));
             }
@@ -412,6 +439,61 @@ mod tests {
     #[test]
     fn parse_gr3d_freq_missing_returns_none() {
         assert_eq!(parse_gr3d_freq("RAM 1/2 CPU 5%"), None);
+    }
+
+    // ---- parse_util_pct / sysfs utilization ----
+    #[test]
+    fn parses_a_utilization_reading_that_carries_its_unit() {
+        // KGSL 이 실제로 쓰는 형태. 단위를 못 넘기면 축 전체가 조용히 죽는다.
+        assert_eq!(parse_util_pct("90 %\n"), Some(90.0));
+        assert_eq!(parse_util_pct("0 %\n"), Some(0.0));
+        assert_eq!(parse_util_pct("90%"), Some(90.0));
+        // devfreq/gpu_load 는 단위 없는 정수.
+        assert_eq!(parse_util_pct("89\n"), Some(89.0));
+    }
+
+    #[test]
+    fn a_reading_with_no_leading_number_is_not_a_utilization() {
+        assert_eq!(parse_util_pct("N/A\n"), None);
+        assert_eq!(parse_util_pct(""), None);
+        assert_eq!(parse_util_pct("%\n"), None);
+    }
+
+    #[test]
+    fn the_sysfs_provider_reads_a_percentage_written_with_a_unit() {
+        // `gpu_busy_percentage` 를 그대로 재현: 이 테스트는 파서를 되돌리면 깨진다.
+        let root = TempDir::new().unwrap();
+        let f = root.path().join("gpu_busy_percentage");
+        fs::write(&f, "90 %\n").unwrap();
+
+        let mut p = SysfsGpuProvider::with_custom_util(f.to_string_lossy().into_owned());
+        assert_eq!(p.util_pct(), Some(90.0));
+    }
+
+    #[test]
+    fn the_galaxy_s25_kgsl_class_path_is_a_utilization_candidate() {
+        // S25(Adreno 830)에는 class 경로만 있다. 후보에서 빼면 이 테스트가 실패한다.
+        let root = TempDir::new().unwrap();
+        let dir = root.path().join("class/kgsl/kgsl-3d0/devfreq");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("gpu_load"), "89\n").unwrap();
+
+        assert!(matches!(detect_backend(root.path()), GpuBackend::Sysfs));
+    }
+
+    #[test]
+    fn the_frequency_falls_back_to_devfreq_when_gpuclk_is_unreadable() {
+        // S25 에서 `gpuclk` 는 존재하지만 읽히지 않는다 — read 실패는 다음 후보로 넘어가야 한다.
+        let root = TempDir::new().unwrap();
+        let cur = root.path().join("cur_freq");
+        fs::write(&cur, "1200000000\n").unwrap();
+
+        let mut p = SysfsGpuProvider::with_defaults();
+        p.freq_paths = vec![
+            root.path().join("gpuclk").to_string_lossy().into_owned(),
+            cur.to_string_lossy().into_owned(),
+        ];
+        assert_eq!(p.freq_hz(), Some(1_200_000_000));
     }
 
     // ---- detect_backend ----
