@@ -457,18 +457,31 @@ fn parse_single_action(entry: &Table) -> LuaResult<EngineCommand> {
         "restore_defaults" => Ok(EngineCommand::RestoreDefaults),
         "suspend" => Ok(EngineCommand::Suspend),
         "resume" => Ok(EngineCommand::Resume),
-        "gpu.share" => {
-            let foreground: f32 = entry.get("foreground")?;
-            if !(foreground.is_finite() && (0.0..=1.0).contains(&foreground)) {
-                return Err(mlua::Error::runtime(format!(
-                    "gpu.share foreground must be finite and in [0.0, 1.0], got {foreground}"
-                )));
+        "gpu.yield" => {
+            // Checked here, not left to the engine's deserializer: a fractional value would
+            // serialize as a float and the whole frame would be dropped engine-side without a
+            // response naming the field. Lua 5.4 keeps `4` and `4.0` as different subtypes;
+            // both name the same interval, so an integral float is accepted.
+            let every = match entry.get::<Value>("every")? {
+                Value::Integer(i) => u32::try_from(i).ok(),
+                Value::Number(n) if n.fract() == 0.0 && (0.0..=u32::MAX as f64).contains(&n) => {
+                    Some(n as u32)
+                }
+                _ => None,
             }
-            Ok(EngineCommand::GpuShare { foreground })
+            .filter(|&e| e <= argus_shared::GPU_YIELD_EVERY_MAX);
+            let Some(every) = every else {
+                return Err(mlua::Error::runtime(format!(
+                    "gpu.yield every must be an integer in 0..={}, got {:?}",
+                    argus_shared::GPU_YIELD_EVERY_MAX,
+                    entry.get::<Value>("every")?
+                )));
+            };
+            Ok(EngineCommand::GpuYield { every })
         }
         unknown => Err(mlua::Error::runtime(format!(
             "unknown action type '{unknown}' — the contract carries kv.compress, \
-             restore_defaults, suspend, resume and gpu.share"
+             restore_defaults, suspend, resume and gpu.yield"
         ))),
     }
 }
@@ -682,4 +695,39 @@ fn parse_meminfo_value(s: &str) -> u64 {
         .next()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn action(lua: &Lua, src: &str) -> LuaResult<EngineCommand> {
+        parse_single_action(&lua.load(src).eval::<Table>()?)
+    }
+
+    #[test]
+    fn gpu_yield_parses() {
+        let lua = Lua::new();
+        for (src, want) in [
+            (r#"{ type = "gpu.yield", every = 4 }"#, 4),
+            (r#"{ type = "gpu.yield", every = 4.0 }"#, 4),
+            (r#"{ type = "gpu.yield", every = 0 }"#, 0),
+        ] {
+            assert_eq!(
+                action(&lua, src).unwrap(),
+                EngineCommand::GpuYield { every: want },
+                "{src}"
+            );
+        }
+    }
+
+    #[test]
+    fn gpu_yield_rejects_fraction_and_range() {
+        let lua = Lua::new();
+        for bad in ["2.5", "65", "-1", "nil", r#""4""#] {
+            let src = format!(r#"{{ type = "gpu.yield", every = {bad} }}"#);
+            let err = action(&lua, &src).expect_err(&src).to_string();
+            assert!(err.contains("gpu.yield"), "{src}: {err}");
+        }
+    }
 }

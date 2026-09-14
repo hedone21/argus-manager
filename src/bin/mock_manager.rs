@@ -83,9 +83,9 @@ struct Args {
     #[arg(long)]
     keep_ratio: Option<f32>,
 
-    /// foreground for GpuShare, in [0.0, 1.0].
+    /// Layer interval for GpuYield, in 0..=64 (0 turns yielding off).
     #[arg(long)]
-    foreground: Option<f32>,
+    every: Option<u32>,
 
     /// sink_size for KvStreaming.
     #[arg(long)]
@@ -271,7 +271,7 @@ struct ScenarioCommand {
 struct CommandParams<'a> {
     name: &'a str,
     keep_ratio: Option<f32>,
-    foreground: Option<f32>,
+    every: Option<u32>,
 }
 
 fn build_command(params: &CommandParams<'_>) -> anyhow::Result<EngineCommand> {
@@ -287,15 +287,13 @@ fn build_command(params: &CommandParams<'_>) -> anyhow::Result<EngineCommand> {
         "RestoreDefaults" => Ok(EngineCommand::RestoreDefaults),
         "Suspend" => Ok(EngineCommand::Suspend),
         "Resume" => Ok(EngineCommand::Resume),
-        "GpuShare" => {
-            let foreground = params
-                .foreground
-                .context("--foreground required for GpuShare")?;
-            Ok(EngineCommand::GpuShare { foreground })
+        "GpuYield" => {
+            let every = params.every.context("--every required for GpuYield")?;
+            Ok(EngineCommand::GpuYield { every })
         }
         other => bail!(
             "unknown command '{}' — the contract carries KvCompress, RestoreDefaults, \
-             Suspend, Resume and GpuShare",
+             Suspend, Resume and GpuYield",
             other
         ),
     }
@@ -536,7 +534,7 @@ fn run_single_command(
     let cmd = build_command(&CommandParams {
         name: cmd_name,
         keep_ratio: args.keep_ratio,
-        foreground: args.foreground,
+        every: args.every,
     })?;
 
     let seq_id = 1u64;
@@ -615,7 +613,7 @@ fn run_scenario(stream: &mut (impl Read + Write), path: &PathBuf) -> anyhow::Res
         let cmd = build_command(&CommandParams {
             name: &entry.command,
             keep_ratio: entry.keep_ratio, // reuse delay_ms for target_ms in scenario
-            foreground: None,             // GpuShare is CLI-only; scenario files don't carry it
+            every: None,                  // GpuYield is CLI-only; scenario files don't carry it
         })?;
 
         seq_id += 1;
@@ -934,13 +932,11 @@ mod tests {
         }
 
         let cmd = build_command(&CommandParams {
-            foreground: Some(1.0),
-            ..params("GpuShare")
+            every: Some(4),
+            ..params("GpuYield")
         })
         .unwrap();
-        assert!(
-            matches!(cmd, EngineCommand::GpuShare { foreground } if (foreground - 1.0).abs() < f32::EPSILON)
-        );
+        assert_eq!(cmd, EngineCommand::GpuYield { every: 4 });
 
         assert!(
             build_command(&params("KvEvictH2o")).is_err(),
@@ -1063,7 +1059,7 @@ mod tests {
         CommandParams {
             name,
             keep_ratio: None,
-            foreground: None,
+            every: None,
         }
     }
 

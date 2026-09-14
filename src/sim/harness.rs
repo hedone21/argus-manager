@@ -466,8 +466,8 @@ fn observable_action_name(cmd: &EngineCommand) -> Option<String> {
         EngineCommand::RestoreDefaults
         | EngineCommand::Suspend
         | EngineCommand::Resume
-        // GpuShare has no simulated resource physics (tickets/015 is on-device only) —
+        // GpuYield has no simulated resource physics (it is measured on-device only) —
         // grouped with the other commands the simulator doesn't track as an action.
-        | EngineCommand::GpuShare { .. } => None,
+        | EngineCommand::GpuYield { .. } => None,
     }
 }
