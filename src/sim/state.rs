@@ -278,6 +278,9 @@ impl EngineStateModel {
             }
             // The simulator models resource physics, not the engine's lifecycle.
             EngineCommand::Suspend | EngineCommand::Resume => {}
+            // GpuShare's effect (yield_policy on the engine) has no simulated model yet —
+            // tickets/015 measures it on-device, not through this harness.
+            EngineCommand::GpuShare { .. } => {}
         }
     }
 

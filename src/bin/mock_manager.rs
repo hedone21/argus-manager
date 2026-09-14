@@ -83,6 +83,10 @@ struct Args {
     #[arg(long)]
     keep_ratio: Option<f32>,
 
+    /// foreground for GpuShare, in [0.0, 1.0].
+    #[arg(long)]
+    foreground: Option<f32>,
+
     /// sink_size for KvStreaming.
     #[arg(long)]
     sink_size: Option<usize>,
@@ -267,6 +271,7 @@ struct ScenarioCommand {
 struct CommandParams<'a> {
     name: &'a str,
     keep_ratio: Option<f32>,
+    foreground: Option<f32>,
 }
 
 fn build_command(params: &CommandParams<'_>) -> anyhow::Result<EngineCommand> {
@@ -282,9 +287,15 @@ fn build_command(params: &CommandParams<'_>) -> anyhow::Result<EngineCommand> {
         "RestoreDefaults" => Ok(EngineCommand::RestoreDefaults),
         "Suspend" => Ok(EngineCommand::Suspend),
         "Resume" => Ok(EngineCommand::Resume),
+        "GpuShare" => {
+            let foreground = params
+                .foreground
+                .context("--foreground required for GpuShare")?;
+            Ok(EngineCommand::GpuShare { foreground })
+        }
         other => bail!(
             "unknown command '{}' — the contract carries KvCompress, RestoreDefaults, \
-             Suspend and Resume",
+             Suspend, Resume and GpuShare",
             other
         ),
     }
@@ -525,6 +536,7 @@ fn run_single_command(
     let cmd = build_command(&CommandParams {
         name: cmd_name,
         keep_ratio: args.keep_ratio,
+        foreground: args.foreground,
     })?;
 
     let seq_id = 1u64;
@@ -603,6 +615,7 @@ fn run_scenario(stream: &mut (impl Read + Write), path: &PathBuf) -> anyhow::Res
         let cmd = build_command(&CommandParams {
             name: &entry.command,
             keep_ratio: entry.keep_ratio, // reuse delay_ms for target_ms in scenario
+            foreground: None,             // GpuShare is CLI-only; scenario files don't carry it
         })?;
 
         seq_id += 1;
@@ -900,7 +913,7 @@ fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    /// The four commands the contract carries, and a refusal for anything else.
+    /// The five commands the contract carries, and a refusal for anything else.
     #[test]
     fn build_command_covers_the_contract() {
         let cmd = build_command(&CommandParams {
@@ -919,6 +932,15 @@ mod tests {
         ] {
             assert_eq!(build_command(&params(name)).unwrap(), want);
         }
+
+        let cmd = build_command(&CommandParams {
+            foreground: Some(1.0),
+            ..params("GpuShare")
+        })
+        .unwrap();
+        assert!(
+            matches!(cmd, EngineCommand::GpuShare { foreground } if (foreground - 1.0).abs() < f32::EPSILON)
+        );
 
         assert!(
             build_command(&params("KvEvictH2o")).is_err(),
@@ -1041,6 +1063,7 @@ mod tests {
         CommandParams {
             name,
             keep_ratio: None,
+            foreground: None,
         }
     }
 

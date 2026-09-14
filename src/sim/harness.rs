@@ -463,6 +463,11 @@ fn schedule_periodic_from(
 fn observable_action_name(cmd: &EngineCommand) -> Option<String> {
     match cmd {
         EngineCommand::KvCompress { .. } => Some("kv.compress".to_string()),
-        EngineCommand::RestoreDefaults | EngineCommand::Suspend | EngineCommand::Resume => None,
+        EngineCommand::RestoreDefaults
+        | EngineCommand::Suspend
+        | EngineCommand::Resume
+        // GpuShare has no simulated resource physics (tickets/015 is on-device only) —
+        // grouped with the other commands the simulator doesn't track as an action.
+        | EngineCommand::GpuShare { .. } => None,
     }
 }

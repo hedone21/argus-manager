@@ -457,9 +457,18 @@ fn parse_single_action(entry: &Table) -> LuaResult<EngineCommand> {
         "restore_defaults" => Ok(EngineCommand::RestoreDefaults),
         "suspend" => Ok(EngineCommand::Suspend),
         "resume" => Ok(EngineCommand::Resume),
+        "gpu.share" => {
+            let foreground: f32 = entry.get("foreground")?;
+            if !(foreground.is_finite() && (0.0..=1.0).contains(&foreground)) {
+                return Err(mlua::Error::runtime(format!(
+                    "gpu.share foreground must be finite and in [0.0, 1.0], got {foreground}"
+                )));
+            }
+            Ok(EngineCommand::GpuShare { foreground })
+        }
         unknown => Err(mlua::Error::runtime(format!(
             "unknown action type '{unknown}' — the contract carries kv.compress, \
-             restore_defaults, suspend and resume"
+             restore_defaults, suspend, resume and gpu.share"
         ))),
     }
 }

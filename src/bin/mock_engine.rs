@@ -180,6 +180,12 @@ impl EngineState_ {
                 self.state = EngineState::Running;
                 CommandResult::Ok
             }
+            EngineCommand::GpuShare { .. } => {
+                // The mock engine has no yield_policy to drive — the directive handler
+                // already logs the command's Debug form, which is all this arm needs to
+                // do (tickets/015 T2-b).
+                CommandResult::Ok
+            }
         }
     }
 
