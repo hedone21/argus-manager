@@ -466,8 +466,10 @@ fn observable_action_name(cmd: &EngineCommand) -> Option<String> {
         EngineCommand::RestoreDefaults
         | EngineCommand::Suspend
         | EngineCommand::Resume
-        // GpuYield has no simulated resource physics (it is measured on-device only) —
-        // grouped with the other commands the simulator doesn't track as an action.
-        | EngineCommand::GpuYield { .. } => None,
+        // GpuYield and GpuOffload have no simulated resource physics (they are measured
+        // on-device only) — grouped with the other commands the simulator doesn't track as an
+        // action.
+        | EngineCommand::GpuYield { .. }
+        | EngineCommand::GpuOffload { .. } => None,
     }
 }

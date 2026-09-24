@@ -87,6 +87,10 @@ struct Args {
     #[arg(long)]
     every: Option<u32>,
 
+    /// On/off for GpuOffload: `--on true` or `--on false`.
+    #[arg(long)]
+    on: Option<bool>,
+
     /// sink_size for KvStreaming.
     #[arg(long)]
     sink_size: Option<usize>,
@@ -272,6 +276,7 @@ struct CommandParams<'a> {
     name: &'a str,
     keep_ratio: Option<f32>,
     every: Option<u32>,
+    on: Option<bool>,
 }
 
 fn build_command(params: &CommandParams<'_>) -> anyhow::Result<EngineCommand> {
@@ -291,9 +296,15 @@ fn build_command(params: &CommandParams<'_>) -> anyhow::Result<EngineCommand> {
             let every = params.every.context("--every required for GpuYield")?;
             Ok(EngineCommand::GpuYield { every })
         }
+        "GpuOffload" => {
+            let on = params
+                .on
+                .context("--on <true|false> required for GpuOffload")?;
+            Ok(EngineCommand::GpuOffload { on })
+        }
         other => bail!(
             "unknown command '{}' — the contract carries KvCompress, RestoreDefaults, \
-             Suspend, Resume and GpuYield",
+             Suspend, Resume, GpuYield and GpuOffload",
             other
         ),
     }
@@ -535,6 +546,7 @@ fn run_single_command(
         name: cmd_name,
         keep_ratio: args.keep_ratio,
         every: args.every,
+        on: args.on,
     })?;
 
     let seq_id = 1u64;
@@ -614,6 +626,7 @@ fn run_scenario(stream: &mut (impl Read + Write), path: &PathBuf) -> anyhow::Res
             name: &entry.command,
             keep_ratio: entry.keep_ratio, // reuse delay_ms for target_ms in scenario
             every: None,                  // GpuYield is CLI-only; scenario files don't carry it
+            on: None,                     // GpuOffload likewise
         })?;
 
         seq_id += 1;
@@ -911,7 +924,7 @@ fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    /// The five commands the contract carries, and a refusal for anything else.
+    /// The six commands the contract carries, and a refusal for anything else.
     #[test]
     fn build_command_covers_the_contract() {
         let cmd = build_command(&CommandParams {
@@ -937,6 +950,19 @@ mod tests {
         })
         .unwrap();
         assert_eq!(cmd, EngineCommand::GpuYield { every: 4 });
+
+        for on in [true, false] {
+            let cmd = build_command(&CommandParams {
+                on: Some(on),
+                ..params("GpuOffload")
+            })
+            .unwrap();
+            assert_eq!(cmd, EngineCommand::GpuOffload { on });
+        }
+        assert!(
+            build_command(&params("GpuOffload")).is_err(),
+            "--on is required"
+        );
 
         assert!(
             build_command(&params("KvEvictH2o")).is_err(),
@@ -1060,6 +1086,7 @@ mod tests {
             name,
             keep_ratio: None,
             every: None,
+            on: None,
         }
     }
 

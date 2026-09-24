@@ -19,6 +19,7 @@
 //! return { type = "kv.compress", budget = 0.5 }   -- retain 50% of uncompressed KV bytes
 //! return { type = "restore_defaults" }            -- release what was applied
 //! return { type = "suspend" } / { type = "resume" }
+//! return { type = "gpu.offload", on = true }      -- move part of the engine's GPU work to the CPU
 //! ```
 //!
 //! It may also define `POLICY_META = { name = ..., version = ... }`, which is logged.
@@ -479,9 +480,19 @@ fn parse_single_action(entry: &Table) -> LuaResult<EngineCommand> {
             };
             Ok(EngineCommand::GpuYield { every })
         }
+        "gpu.offload" => {
+            // Read as a raw `Value`: mlua's `bool` conversion turns `nil` into `false` and any
+            // other value into `true`, so a missing or misspelled `on` would silently pick a state.
+            match entry.get::<Value>("on")? {
+                Value::Boolean(on) => Ok(EngineCommand::GpuOffload { on }),
+                other => Err(mlua::Error::runtime(format!(
+                    "gpu.offload on must be a boolean, got {other:?}"
+                ))),
+            }
+        }
         unknown => Err(mlua::Error::runtime(format!(
             "unknown action type '{unknown}' — the contract carries kv.compress, \
-             restore_defaults, suspend, resume and gpu.yield"
+             restore_defaults, suspend, resume, gpu.yield and gpu.offload"
         ))),
     }
 }
@@ -728,6 +739,42 @@ mod tests {
             let src = format!(r#"{{ type = "gpu.yield", every = {bad} }}"#);
             let err = action(&lua, &src).expect_err(&src).to_string();
             assert!(err.contains("gpu.yield"), "{src}: {err}");
+        }
+    }
+
+    #[test]
+    fn gpu_offload_parses() {
+        let lua = Lua::new();
+        for on in [true, false] {
+            let src = format!(r#"{{ type = "gpu.offload", on = {on} }}"#);
+            assert_eq!(
+                action(&lua, &src).unwrap(),
+                EngineCommand::GpuOffload { on },
+                "{src}"
+            );
+        }
+    }
+
+    #[test]
+    fn gpu_offload_rejects_non_bool() {
+        let lua = Lua::new();
+        for bad in ["1", "0", r#""true""#, "{}"] {
+            let src = format!(r#"{{ type = "gpu.offload", on = {bad} }}"#);
+            let err = action(&lua, &src).expect_err(&src).to_string();
+            assert!(err.contains("gpu.offload"), "{src}: {err}");
+        }
+    }
+
+    #[test]
+    fn gpu_offload_rejects_missing_on() {
+        let lua = Lua::new();
+        for src in [
+            r#"{ type = "gpu.offload" }"#,
+            r#"{ type = "gpu.offload", on = nil }"#,
+            r#"{ type = "gpu.offload", On = true }"#,
+        ] {
+            let err = action(&lua, src).expect_err(src).to_string();
+            assert!(err.contains("gpu.offload"), "{src}: {err}");
         }
     }
 }

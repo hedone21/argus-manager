@@ -180,10 +180,10 @@ impl EngineState_ {
                 self.state = EngineState::Running;
                 CommandResult::Ok
             }
-            EngineCommand::GpuYield { .. } => {
-                // The mock engine has no yield_policy to drive — the directive handler
-                // already logs the command's Debug form, which is all this arm needs to
-                // do.
+            EngineCommand::GpuYield { .. } | EngineCommand::GpuOffload { .. } => {
+                // The mock engine has no yield_policy or tensor partition to drive — the
+                // directive handler already logs the command's Debug form, which is all this
+                // arm needs to do.
                 CommandResult::Ok
             }
         }
