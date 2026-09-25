@@ -278,9 +278,10 @@ impl EngineStateModel {
             }
             // The simulator models resource physics, not the engine's lifecycle.
             EngineCommand::Suspend | EngineCommand::Resume => {}
-            // GpuYield's effect (yield_policy on the engine) has no simulated model yet —
-            // it is measured on-device, not through this harness.
-            EngineCommand::GpuYield { .. } => {}
+            // GpuYield's effect (yield_policy on the engine) and GpuOffload's (the engine's
+            // tensor partition) have no simulated model yet — they are measured on-device, not
+            // through this harness.
+            EngineCommand::GpuYield { .. } | EngineCommand::GpuOffload { .. } => {}
         }
     }
 
